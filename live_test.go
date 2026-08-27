@@ -6,8 +6,10 @@ import (
 	"testing"
 )
 
-func regionAt(width int, rows []Row) *Region {
-	t := Term{Width: width, Height: 24, Profile: NoColor, IsTTY: true, Variant: Nebelung}
+func regionAt(width int, rows []Row) *Region { return regionOn(width, NoColor, rows) }
+
+func regionOn(width int, prof Profile, rows []Row) *Region {
+	t := Term{Width: width, Height: 24, Profile: prof, IsTTY: true, Variant: Nebelung}
 	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: t, theme: NewTheme(t)}
 	return &Region{p: p, rows: rows}
 }
@@ -22,15 +24,22 @@ var jobs = []Row{
 // the number of rows it PRINTED, so no row may reach the terminal's last
 // column — otherwise the terminal wraps one row into two screen lines and the
 // cursor walks up through the middle of the block.
+// It sweeps every colour depth, and that is not thoroughness for its own sake.
+// Running it colourless only is what let the `bare` tier ship two cells over the
+// edge: it trimmed the gutter's padding back off with strings.TrimRight(mark,
+// " "), which does exactly nothing once the mark ends in a reset escape. The bug
+// was invisible to this test until the day it had a painted string to look at.
 func TestRegionNeverReachesTheLastColumn(t *testing.T) {
-	for w := 2; w <= 200; w++ {
-		lines := regionAt(w, jobs).layout()
-		if len(lines) != len(jobs) {
-			t.Fatalf("width %d: %d lines for %d rows", w, len(lines), len(jobs))
-		}
-		for _, l := range lines {
-			if Width(l) > w-1 {
-				t.Fatalf("width %d: %q is %d cells, limit %d", w, l, Width(l), w-1)
+	for _, prof := range []Profile{NoColor, ANSI16, ANSI256, TrueColor} {
+		for w := 2; w <= 200; w++ {
+			lines := regionOn(w, prof, jobs).layout()
+			if len(lines) != len(jobs) {
+				t.Fatalf("profile %d, width %d: %d lines for %d rows", prof, w, len(lines), len(jobs))
+			}
+			for _, l := range lines {
+				if Width(l) > w-1 {
+					t.Fatalf("profile %d, width %d: %q is %d cells, limit %d", prof, w, l, Width(l), w-1)
+				}
 			}
 		}
 	}
