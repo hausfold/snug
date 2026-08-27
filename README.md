@@ -62,6 +62,32 @@ turning — which a shell painter cannot do at all.
 `snug caps` reports what it detected; `snug demo` draws the whole vocabulary on
 your terminal, which is the fastest way to see what a resize does to it.
 
+### When there is no binary
+
+A script cannot always assume `snug` is on PATH — an older generation still on
+someone's disk, a launchd job or `ssh mac …` off a thin PATH, a checkout on a
+machine that never installed the layer, CI. `share/ui.sh` ships **inside the
+same derivation**, beside `bin/snug`, and is the whole painter on those:
+
+```sh
+# from Nix, with no vendored copy and nothing to keep in step
+wrapProgram $out/bin/yours --set MY_UI_SH ${snug}/share/ui.sh
+
+# and in the script, degrading rather than assuming
+[ -r "${MY_UI_SH:-}" ] && source "$MY_UI_SH"
+
+ui_say "resolving inputs"          # → stderr, folded, hung at the gutter
+ui_data "$path"                    # → stdout, untouched
+ui_row run build "12s"; ui_paint   # → a live region, repainted in place
+```
+
+Same roles, same glyphs, same tiers, same palette — generated from the same
+`TOKENS` list as `palette.go`, so the two halves cannot disagree about a colour.
+Lower fidelity in one place only: it measures characters, not cells, so it is
+honest about ordinary text and hands emoji to the binary. It is deliberately
+*not* a wrapper around `snug` when snug is present — one fork per **command** is
+the whole economy, and only the caller can see where a command begins.
+
 ## Colour
 
 Callers name a **role** — `accent`, `ok`, `warn`, `err`, `muted`, `subject`,

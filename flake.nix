@@ -28,8 +28,24 @@
           vendorHash = "sha256-iiJJ2y22zizvc4tVcaDYBuHrmF45hWH68Zt//KoMvyw=";
 
           # Build only the CLI. The library is compiled as its dependency, which
-          # is the only thing this derivation has to install.
+          # is the only thing this derivation has to COMPILE.
           subPackages = [ "cmd/snug" ];
+
+          # …but not the only thing it installs. `share/ui.sh` is the bash half
+          # of the same spec — the painter for a machine that cannot see
+          # `bin/snug`: an older generation, a launchd job off a thin PATH, a
+          # checkout on a Mac that never installed the layer. It ships INSIDE
+          # this derivation so a consumer reads it straight off the store path
+          # (`${snug}/share/ui.sh`) with no vendored copy and no drift check —
+          # which is the whole reason it lives in this repo rather than in the
+          # workshop, where `haus.sh` (read into a store binary, on a machine
+          # with no workshop checkout) could never have sourced it.
+          #
+          # Not a `passthru`: it has to survive being the ONLY thing a caller
+          # takes, so it goes in $out beside the binary it stands in for.
+          postInstall = ''
+            install -Dm444 share/ui.sh $out/share/ui.sh
+          '';
 
           meta = with pkgs.lib; {
             description = "Terminal presentation for the hausfold family";

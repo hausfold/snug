@@ -1,7 +1,8 @@
 # AGENTS.md
 
-**snug** — the hausfold family's terminal presentation library. One Go package
-plus one binary, because `bench` and `haus` are bash and will stay bash.
+**snug** — the hausfold family's terminal presentation library. One Go package,
+one binary, and one bash fallback (`share/ui.sh`), because `bench` and `haus`
+are bash and will stay bash.
 
 **This file is the one set of instructions, for every agent** — Claude Code,
 Codex, OpenCode, Cursor, Copilot alike. Per-client wiring lives in that client's
@@ -14,6 +15,7 @@ own file (`CLAUDE.md` here is the `@AGENTS.md` import and nothing else).
 | ✅ how a line, a table or a live region is **drawn** | here |
 | ✅ what a role **degrades to** at 256 / 16 / no colour | here |
 | ✅ the glyph set and its declared widths | here |
+| ✅ the **bash fallback** — `share/ui.sh`, the same spec for a machine with no `snug` on PATH | here, since 2026-08-27 |
 | ❌ which colour a role **is** | `hausfold/nebelung` — `palette.go` is generated from it, never hand-edited |
 | ❌ **whether** a tool should print something | that tool's repo |
 | ❌ the standard this implements | `hausfold/workshop`'s `docs/cli-presentation.md` — the design lives there because it binds five repos; this repo is one implementation of it |
@@ -106,24 +108,49 @@ and `bench` needs a filter *it* drives.
 `snug run` coprocess for the whole command is one fork. Any change that puts a
 process in a loop is a regression, whatever the benchmark says about the loop.
 
-## The palette is generated
+## The palette is generated — both copies of it, in one run
 
-`palette.go` is written by `script/gen-palette.sh` from a nebelung checkout and
-carries a `DO NOT EDIT` header. Hand-editing it puts the family back where it
-started: seven hand-picked 256-colour indices, ΔE 2–27 from the flavour every
-other tool on the machine was wearing, with two different greys for one role and
-a primary accent that resolved to **blue** — the one hue nebelung exists to
-strip out.
+`script/gen-palette.sh` writes **two** files from one nebelung checkout and one
+`TOKENS` list:
 
-Adding a role means a row in `roleToken`, a row in `role16`, a row in the
-`TOKENS` list in `script/gen-palette.py`, and a regeneration. Four places on
-purpose: a role without a 16-colour answer is a role that vanishes on somebody's
-terminal.
+| | |
+|---|---|
+| `palette.go` | rewritten whole, then `gofmt`ed. `DO NOT EDIT` header. |
+| `share/ui.sh` | the `UI__HEX` and `UI__X256` blocks between the `▼▼▼`/`▲▲▲` markers, spliced in place — the rest of that file is hand-written. |
+
+Hand-editing either puts the family back where it started: seven hand-picked
+256-colour indices, ΔE 2–27 from the flavour every other tool on the machine was
+wearing, with two different greys for one role and a primary accent that
+resolved to **blue** — the one hue nebelung exists to strip out.
+
+**One generator for both, on purpose.** `UI__X256` is `theme.go`'s `nearest256`,
+ported into `gen-palette.py` digit for digit, weights and all — the bash half
+answering a *different* index from the binary would be worse than having no
+fallback, because it makes "which machine is this?" a question you have to ask
+about your own output. Two generators kept in step by hand is that bug with
+extra steps.
+
+⚠️ The weights matter and are easy to drop. `dist` is 3/6/1, not plain
+Euclidean; plain Euclidean picks a visibly different neighbour for colours this
+low in chroma. `test/ui.bats` re-derives all thirty-two indices with its own
+copy of the arithmetic — written out again rather than imported, because a test
+that asks the generator to check its own maths checks nothing.
+
+Adding a role means a row in `roleToken`, a row in `role16`, a row in
+`share/ui.sh`'s `UI__TOKEN` **and** `UI__ANSI16`, a row in the `TOKENS` list in
+`script/gen-palette.py`, and a regeneration. Five places on purpose: a role
+without a 16-colour answer is a role that vanishes on somebody's terminal, and a
+role the fallback has never heard of vanishes on somebody's *machine*.
 
 ## Working here
 
 - `go test ./...` before anything. The width sweeps are fast and they are the
   point.
+- **`bats test/ui.bats` and `shellcheck share/ui.sh` are the other half**, and
+  the Go suite never looks at them. Both run in CI's `bash` job. The bats tests
+  invoke `"$BASH"`, never a bare `bash`: the library needs bash 4 and macOS
+  ships 3.2 as `/bin/bash`, so a bare name fails on the associative array rather
+  than on the thing under test.
 - `go build -o snug ./cmd/snug && ./snug demo`, then resize the window. That is
   the feel-test; the unit tests prove the bound, the demo shows the taste.
 - `gofmt -w .` — CI checks it.
@@ -135,6 +162,10 @@ terminal.
   a laptop and fails in a sandboxed build. Change `go.mod`/`go.sum` and the pin
   is stale: `nix build .#default` prints the mismatch, and the `got:` line is the
   new value.
+- **`share/ui.sh` is part of the derivation** (`postInstall`), not just of the
+  repo — `haus` reads `${snug}/share/ui.sh` off the store path, on machines with
+  no checkout of anything. Moving or renaming it breaks a consumer that CI here
+  cannot see; `nix build .#default && ls result/share` is the check.
 - The flake also ships `overlays.default`, which is how `pkgs.snug` reaches a
   consumer — `haus` takes this flake as an input and puts the binary on PATH from
   that overlay. Adding an output that consumers read means bumping `haus`'s lock
