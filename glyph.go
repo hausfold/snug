@@ -112,6 +112,27 @@ func (t Term) Glyph(m Mark) (string, int) {
 	return s, Gutter
 }
 
+// GlyphBare is the mark ALONE — one cell, with no padding to the Gutter.
+//
+// The narrow tiers of a live region need it, and the padded form is a bug
+// there: at `bare` the gutter has collapsed to a single space, so a mark still
+// carrying two cells of padding puts the row two cells past the window's edge.
+//
+// Trimming that padding off afterwards looks like it covers this and does not.
+// A painted mark ends in a reset escape, so `strings.TrimRight(mark, " ")`
+// silently removes nothing the moment colour is on — which is exactly how it
+// shipped, with a width sweep that only ever ran colourless to say it was fine.
+func (t Term) GlyphBare(m Mark) string {
+	g, ok := glyphs[m]
+	if !ok || m == MarkNone {
+		return ""
+	}
+	if !t.unicode() {
+		return g.ascii
+	}
+	return g.utf8
+}
+
 // unicode reports whether the far end can be trusted with the UTF-8 alphabet.
 //
 // The locale is the only signal there is. It is a weak one — a UTF-8 locale

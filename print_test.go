@@ -50,6 +50,38 @@ func TestATerminalStillFoldsAndHangsAtTheGutter(t *testing.T) {
 	}
 }
 
+// Prose fits the window at every width, in every tier.
+//
+// The floor is where this broke. `Prose() - Gutter` goes negative below four
+// columns, and clamping the TEXT budget up to 1 while the gutter stayed at
+// three put four cells into a two-column window. The gutter has to collapse
+// with the window — to a mark and a space, then to the mark alone.
+//
+// ⚠️ The bound here is `> w`, not `> w-1`, and that is deliberate but unsettled.
+// `Prose()` returns the full Width where `Avail()` returns Width-1, so a line of
+// prose MAY still land in the last column while a table or a live region may
+// not. For a `\n`-terminated line that is harmless in practice — the terminal
+// defers the wrap and the newline resolves it — but it is a one-cell
+// disagreement with this repo's own one rule, and the two ragged right edges
+// are visible side by side in `snug demo`. Settle it deliberately; do not let a
+// test quietly decide it.
+func TestProseNeverReachesTheLastColumn(t *testing.T) {
+	msg := "a sentence long enough to fold several times over, followed by " +
+		"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a-derivation-name-with-no-spaces-in-it and more after it"
+	for _, prof := range []Profile{NoColor, ANSI16, ANSI256, TrueColor} {
+		for w := 1; w <= 200; w++ {
+			tm := Term{Width: w, Height: 24, Profile: prof, IsTTY: true, Variant: Nebelung}
+			p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: tm, theme: NewTheme(tm)}
+			for _, l := range p.render(MarkSay, Accent, msg) {
+				if Width(l) > w {
+					t.Fatalf("profile %d, width %d: %q is %d cells, window is %d",
+						prof, w, l, Width(l), w)
+				}
+			}
+		}
+	}
+}
+
 // Data is stdout, and was never folded or painted either way.
 func TestDataIsNeverFoldedOnATerminal(t *testing.T) {
 	out := &bytes.Buffer{}

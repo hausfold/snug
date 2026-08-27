@@ -98,10 +98,29 @@ func (p *Printer) line(m Mark, r Role, format string, a ...any) {
 }
 
 func (p *Printer) render(m Mark, r Role, msg string) []string {
+	// The gutter is three cells whatever the mark is, so a ✓ line and a 🌫 line
+	// start their text in the same column.
+	//
+	// Under four columns it cannot be: three cells of gutter plus one of text is
+	// already past the edge. So it collapses to the mark and a space, and then
+	// to the mark alone — the same floor the live region drops to, for the same
+	// reason. Clamping the text budget up to 1 while the gutter stayed at 3 is
+	// how a two-column window got a four-cell line.
+	prose := p.term.Prose()
 	mark, gw := p.term.Glyph(m)
-	budget := p.term.Prose() - gw
+	switch {
+	case prose >= Gutter+1:
+	case prose >= 3:
+		gw, mark = 2, p.term.GlyphBare(m)+" "
+	default:
+		gw, mark = 1, p.term.GlyphBare(m)
+	}
+	painted := p.theme.Paint(r, mark)
+	budget := prose - gw
 	if budget < 1 {
-		budget = 1
+		// One cell, and a mark to put in it. The mark is what survives; below
+		// one cell there is nothing honest left to draw.
+		return []string{painted}
 	}
 	folded := Fold(msg, budget)
 	out := make([]string, 0, len(folded))
@@ -109,7 +128,7 @@ func (p *Printer) render(m Mark, r Role, msg string) []string {
 	for i, l := range folded {
 		head := pad
 		if i == 0 {
-			head = p.theme.Paint(r, mark)
+			head = painted
 		}
 		out = append(out, head+l)
 	}

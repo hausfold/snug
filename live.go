@@ -215,22 +215,34 @@ func (r *Region) layout() []string {
 		}
 	}
 
+	// The two narrow tiers take the mark UNPADDED. Their gutter is a single
+	// space, and two carried cells of padding is two cells past the edge — see
+	// GlyphBare for why trimming it back off afterwards does not work.
+	narrow := namew == 0 || gut == 2
+
 	out := make([]string, 0, len(r.rows))
 	for _, row := range r.rows {
 		var mark string
 		if row.Spin {
-			mark = th.Paint(Accent, Pad(t.Spin(row.Frame), Gutter))
+			g := t.Spin(row.Frame)
+			if !narrow {
+				g = Pad(g, Gutter)
+			}
+			mark = th.Paint(Accent, g)
 		} else {
-			g, _ := t.Glyph(row.Mark)
+			g := t.GlyphBare(row.Mark)
+			if !narrow {
+				g, _ = t.Glyph(row.Mark)
+			}
 			mark = th.Paint(markRole(row.Mark), g)
 		}
 		name := Truncate(row.Name, namew, t.Ellipsis())
 
 		switch {
 		case namew == 0:
-			out = append(out, strings.TrimRight(mark, " "))
+			out = append(out, mark)
 		case gut == 2:
-			out = append(out, strings.TrimRight(mark, " ")+" "+th.Paint(Subject, name))
+			out = append(out, mark+" "+th.Paint(Subject, name))
 		case detailed:
 			out = append(out, "   "+mark+th.Paint(Subject, Pad(name, namew))+
 				" "+th.Paint(Muted, row.Detail))
