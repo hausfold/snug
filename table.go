@@ -210,6 +210,15 @@ func (t Table) stack(term Term, th *Theme) []string {
 				}
 				continue
 			}
+			// A column that declared which END matters keeps that promise here
+			// too: folding a path breaks it mid-component (`…nebelun` / `g/…`),
+			// which reads as a directory that does not exist. One left-cut line
+			// says more than three ragged ones.
+			if c.Cut == CutLeft {
+				out = append(out, th.Paint(Field, label)+
+					th.Paint(c.Role, TruncateLeft(row[i], budget, term.Ellipsis())))
+				continue
+			}
 			pad := strings.Repeat(" ", Width(label))
 			for j, l := range Fold(row[i], budget) {
 				if j == 0 {
