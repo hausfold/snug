@@ -185,10 +185,10 @@ rows() {
 }
 
 @test "a stream with no window is never folded" {
-  # The bug scruff found: an acceptance suite greps stderr for whole messages, and
-  # every assertion long enough to cross column 80 broke the day it moved onto
-  # snug. A pipe has no geometry, and inventing one for it is the `tput cols`
-  # mistake wearing different clothes.
+  # The bug scruff found: an acceptance suite greps stderr for whole messages,
+  # and every assertion long enough to cross column 80 broke the day it moved
+  # onto snug. A pipe has no geometry, and inventing one for it is the
+  # `tput cols` mistake wearing different clothes.
   long="still live at /var/folders/9k/xxxxxxxxxxxxxxxxxxxx/T/scruff-test.AbCdEf/repo — nothing was rebuilt"
   ui_sh "ui_say '$long' 2>&1"
   [ "$status" -eq 0 ]

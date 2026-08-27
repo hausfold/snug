@@ -60,9 +60,9 @@ UI_SH=1
 # ── what the far end can do ──────────────────────────────────────────────────
 # Measured from STDERR, not stdout, and that is the family stream contract
 # rather than a preference: stdout carries DATA only, so callers can do
-# `cd "$(scruff child …)"`. The human stream is fd 2, so fd 2 is what we ask about
-# the window, the colour and the cursor. A tool whose prose is redirected to a
-# file while the terminal is still there gets a painter, which is right.
+# `cd "$(scruff child …)"`. The human stream is fd 2, so fd 2 is what we ask
+# about the window, the colour and the cursor. A tool whose prose is redirected
+# to a file while the terminal is still there gets a painter, which is right.
 UI_TTY=""; [ -t 2 ] && UI_TTY=1
 
 # UI_PROFILE — none | 16 | 256 | truecolor
