@@ -16,7 +16,7 @@ func demoTable() Table {
 		},
 		Rows: [][]string{
 			{"haus", "current", "/Users/you/code/workshop/haus/modules/core/haus.sh", "2h"},
-			{"holt", "stale", "/Users/you/code/workshop/holt/internal/ui/ui.go", "3d"},
+			{"scruff", "stale", "/Users/you/code/workshop/scruff/internal/ui/ui.go", "3d"},
 			{"nebelung", "current", "/Users/you/code/workshop/nebelung/palette/nebelung.json", "11m"},
 		},
 	}

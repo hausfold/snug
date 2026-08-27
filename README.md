@@ -18,7 +18,7 @@ in-place repaint quietly depends on and none of ours held.
 ⚠   warn · something stale, degraded, wanting attention
 ✗   fail · something that failed, was refused, or is missing
     haus     current …/modules/core/haus.sh 2h
-    holt     stale   …/internal/ui/ui.go    3d
+    scruff   stale   …/internal/ui/ui.go    3d
     nebelung current …/nebelung.json        11m
 ```
 

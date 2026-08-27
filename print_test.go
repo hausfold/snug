@@ -14,13 +14,13 @@ func printerAt(width int, isTTY bool) (*Printer, *bytes.Buffer) {
 
 // A stream with no window is not folded.
 //
-// This is the bug holt found: its acceptance suite greps stderr for whole
+// This is the bug scruff found: its acceptance suite greps stderr for whole
 // messages, and every assertion long enough to cross column 80 broke the day it
 // moved onto snug — split mid-path, by a width that came from nothing but a
 // struct's zero-value neighbour. A pipe has no geometry; inventing one for it is
 // the `tput cols` mistake wearing different clothes.
 func TestAStreamWithNoWindowIsNeverFolded(t *testing.T) {
-	long := "still live at /var/folders/9k/xxxxxxxxxxxxxxxxxxxxxxxxxxxx/T/holt-test.AbCdEf/repo — nothing was rebuilt"
+	long := "still live at /var/folders/9k/xxxxxxxxxxxxxxxxxxxxxxxxxxxx/T/scruff-test.AbCdEf/repo — nothing was rebuilt"
 	p, err := printerAt(80, false)
 	p.Say("%s", long)
 	got := strings.TrimRight(err.String(), "\n")
@@ -87,7 +87,7 @@ func TestDataIsNeverFoldedOnATerminal(t *testing.T) {
 	out := &bytes.Buffer{}
 	tm := Term{Width: 40, Height: 24, Profile: TrueColor, IsTTY: true, Variant: Nebelung}
 	p := &Printer{Out: out, Err: &bytes.Buffer{}, term: tm, theme: NewTheme(tm)}
-	path := "/var/folders/9k/xxxxxxxxxxxx/T/holt-test.AbCdEf/repo/deep/enough/to/pass/forty"
+	path := "/var/folders/9k/xxxxxxxxxxxx/T/scruff-test.AbCdEf/repo/deep/enough/to/pass/forty"
 	p.Data("%s\n", path)
 	if got := out.String(); got != path+"\n" {
 		t.Fatalf("stdout was not the bytes handed to it:\n%q", got)
