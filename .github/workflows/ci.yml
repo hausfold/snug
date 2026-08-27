@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # gofmt first: a formatting failure after a ten-minute test run is a
+      # ten-minute wait for a one-character fix.
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      # The width sweeps are the point of this suite and they are fast; -race
+      # because Region takes a SIGWINCH on another goroutine while the paint
+      # loop holds the lock.
+      - run: go test -race -timeout 120s ./...
