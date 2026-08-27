@@ -24,6 +24,27 @@ jobs:
       # loop holds the lock.
       - run: go test -race -timeout 120s ./...
 
+  # share/ui.sh is bash, so the Go job above never looks at it — and it is the
+  # painter every family CLI falls back to on a machine that cannot see
+  # `bin/snug`, which makes it the half most likely to break unwatched. Same
+  # treatment the Go half gets: a linter and the width sweeps.
+  #
+  # Ubuntu only, and `bats` runs the tests under `$BASH` rather than `bash` on
+  # purpose: the library needs bash 4 (associative arrays, `${v,,}`) and macOS
+  # ships 3.2 as /bin/bash, so a macos-latest runner would fail on the array
+  # instead of on the thing under test. The library's own bash-4 requirement is
+  # stated in its header; nothing here is testing that macOS's bash is old.
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+      - run: shellcheck share/ui.sh
+      # The palette drift test used to need a second checkout beside this one
+      # and skipped — green, checking nothing — without it. Both halves are in
+      # this repo now, so it always runs.
+      - run: bats test/ui.bats
+
   # The Go job above cannot see a stale `vendorHash`: it never builds the
   # derivation. Without this, a `go.mod`/`go.sum` change lands green here and
   # first fails inside `haus`, one lock ripple and a rebuild away from its
