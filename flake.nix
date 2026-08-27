@@ -42,12 +42,11 @@
       });
 
       # The overlay consumers take, so `pkgs.snug` is the CLI wherever this
-      # flake is an input — the same shape pounce, perch, trill and hausfold/holt
-      # ship, which is what lets a haus module put it on PATH without knowing it
-      # came from a separate flake. (haus calls that last input `scruff`; the
-      # repo keeps the old name until its own 1.0.0. Input names and repo names
-      # are different questions.) The Go PACKAGE needs none of this: a Go
-      # consumer imports `github.com/hausfold/snug` and never sees Nix.
+      # flake is an input — the same shape pounce, perch, trill and
+      # hausfold/scruff ship, which is what lets a haus module put it on PATH
+      # without knowing it came from a separate flake. The Go PACKAGE needs none
+      # of this: a Go consumer imports `github.com/hausfold/snug` and never
+      # sees Nix.
       #
       # ⚠️ `self.packages` is built from THIS flake's nixpkgs, so `final` here
       # supplies the system string and nothing else. A consumer that doesn't set

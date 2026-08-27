@@ -79,7 +79,7 @@ The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
 ## Streams
 
 **Stdout carries DATA only.** Every diagnostic, prompt and progress line goes to
-stderr, because callers do `cd "$(holt child …)"` and hooks read paths off
+stderr, because callers do `cd "$(scruff child …)"` and hooks read paths off
 stdout. `Say`/`Warn`/`Fail` write to `Err`; `Data` is the only thing that writes
 to `Out`.
 

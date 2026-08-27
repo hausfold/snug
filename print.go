@@ -12,7 +12,7 @@ import (
 //
 // The stream rule is a family contract, not a style choice: STDOUT CARRIES DATA
 // ONLY. Every diagnostic, prompt and progress line goes to stderr, because
-// callers do `cd "$(holt child …)"` and hooks read paths off stdout. Say/Warn/
+// callers do `cd "$(scruff child …)"` and hooks read paths off stdout. Say/Warn/
 // Fail therefore write to Err; Data is the only thing that writes to Out.
 type Printer struct {
 	Out io.Writer // data — a path, JSON, the thing a caller captures
