@@ -178,18 +178,18 @@ rows() {
 
 @test "stdout carries data only; every human line goes to stderr" {
   # The family contract, and the reason `snug run` works as a bash coproc:
-  # callers do `cd "$(holt child …)"` and hooks read paths off fd 1.
+  # callers do `cd "$(scruff child …)"` and hooks read paths off fd 1.
   ui_sh '{ ui_say hello; ui_ok fine; ui_warn hm; ui_fail no; } 2>/dev/null; ui_data /the/path'
   [ "$status" -eq 0 ]
   [ "$output" = "/the/path" ] || { echo "stdout carried more than data: [$output]"; false; }
 }
 
 @test "a stream with no window is never folded" {
-  # The bug holt found: an acceptance suite greps stderr for whole messages, and
+  # The bug scruff found: an acceptance suite greps stderr for whole messages, and
   # every assertion long enough to cross column 80 broke the day it moved onto
   # snug. A pipe has no geometry, and inventing one for it is the `tput cols`
   # mistake wearing different clothes.
-  long="still live at /var/folders/9k/xxxxxxxxxxxxxxxxxxxx/T/holt-test.AbCdEf/repo — nothing was rebuilt"
+  long="still live at /var/folders/9k/xxxxxxxxxxxxxxxxxxxx/T/scruff-test.AbCdEf/repo — nothing was rebuilt"
   ui_sh "ui_say '$long' 2>&1"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ] || { echo "a redirected stream was folded: $output"; false; }

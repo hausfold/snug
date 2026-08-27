@@ -60,7 +60,7 @@ UI_SH=1
 # ── what the far end can do ──────────────────────────────────────────────────
 # Measured from STDERR, not stdout, and that is the family stream contract
 # rather than a preference: stdout carries DATA only, so callers can do
-# `cd "$(holt child …)"`. The human stream is fd 2, so fd 2 is what we ask about
+# `cd "$(scruff child …)"`. The human stream is fd 2, so fd 2 is what we ask about
 # the window, the colour and the cursor. A tool whose prose is redirected to a
 # file while the terminal is still there gets a painter, which is right.
 UI_TTY=""; [ -t 2 ] && UI_TTY=1
@@ -491,7 +491,7 @@ ui__fold_one() {
 # ── the six verbs ────────────────────────────────────────────────────────────
 # Every one of them writes to STDERR. Stdout carries data only — `ui_data` is
 # the single thing in this file that touches it — because callers do
-# `cd "$(holt child …)"` and hooks read paths off fd 1. That contract is also
+# `cd "$(scruff child …)"` and hooks read paths off fd 1. That contract is also
 # why `snug run` works as a bash coproc: bash pipes stdin and stdout and leaves
 # stderr on the terminal, which is exactly this split.
 ui__line() { # ui__line <mark> <role> <text>
