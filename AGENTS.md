@@ -130,6 +130,12 @@ terminal.
 - **Ship by default, sized to the change.** Small things commit, verify and
   ship. Anything that changes what a caller sees waits for the user.
 - **Releases are gated** and go through the workshop's `bench release`.
-- `vendorHash` in `flake.nix` is `null` until the first Nix build; take the hash
-  the failure prints and pin it. A `null` hash means the build has network, which
-  works locally and fails in CI.
+- `vendorHash` in `flake.nix` is **pinned, and must never go back to `null`** —
+  a `null` hash lets the build fetch the module graph at run time, which works on
+  a laptop and fails in a sandboxed build. Change `go.mod`/`go.sum` and the pin
+  is stale: `nix build .#default` prints the mismatch, and the `got:` line is the
+  new value.
+- The flake also ships `overlays.default`, which is how `pkgs.snug` reaches a
+  consumer — `haus` takes this flake as an input and puts the binary on PATH from
+  that overlay. Adding an output that consumers read means bumping `haus`'s lock
+  (`bench ship` from the workshop) before anything downstream can see it.

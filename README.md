@@ -86,6 +86,27 @@ The standard it implements is
 [`docs/cli-presentation.md`](https://github.com/hausfold/workshop/blob/main/docs/cli-presentation.md)
 in the workshop.
 
+## Taking it
+
+As a **Go package**, nothing here is involved — `go get github.com/hausfold/snug`
+and import it.
+
+As a **binary**, this repo is a flake. Add it as an input and take
+`overlays.default`, which puts `snug` in `pkgs`:
+
+```nix
+inputs.snug = {
+  url = "github:hausfold/snug";
+  # Not optional in practice: the overlay hands back a package built from
+  # snug's OWN nixpkgs, so without this you realise a second nixpkgs and a
+  # second Go toolchain for one small binary.
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+`nix run github:hausfold/snug -- demo` needs none of that, and is the fastest
+way to see what it draws.
+
 ## License
 
 Apache 2.0.
