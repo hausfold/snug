@@ -23,3 +23,17 @@ jobs:
       # because Region takes a SIGWINCH on another goroutine while the paint
       # loop holds the lock.
       - run: go test -race -timeout 120s ./...
+
+  # The Go job above cannot see a stale `vendorHash`: it never builds the
+  # derivation. Without this, a `go.mod`/`go.sum` change lands green here and
+  # first fails inside `haus`, one lock ripple and a rebuild away from its
+  # cause. It is also the only thing that ever evaluates `overlays.default`.
+  # Linux only — the derivation is platform-independent and a second runner
+  # buys nothing but minutes.
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - run: nix build .#default --print-build-logs
+      - run: nix flake check --print-build-logs
