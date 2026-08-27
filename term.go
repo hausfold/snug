@@ -125,8 +125,26 @@ func configHome() string {
 // while the window was 200 would be hiding the room it had.
 const Cap = 100
 
+// NoFold is the width of a stream that has no window: wide enough that Fold
+// never breaks a line, and finite so the arithmetic around it stays ordinary.
+const NoFold = 1 << 20
+
 // Prose is the width a folded paragraph gets.
+//
+// A stream that is NOT a terminal is never folded, and that is the same
+// principle this library was built on rather than a special case. `tput cols`
+// is wrong because it answers a STATIC 80 for a window it never measured;
+// assuming 80 for a pipe is that identical mistake with the number hardcoded
+// one layer up. A redirected stream has no width to fit, so folding it breaks
+// paths and sentences at a column nobody chose — and the thing on the far end
+// of that pipe is usually grepping for a whole line.
+//
+// A forced-colour CI log renderer lands here too, and wants exactly this: it
+// has colour but no geometry.
 func (t Term) Prose() int {
+	if !t.IsTTY {
+		return NoFold
+	}
 	if t.Width < Cap {
 		return t.Width
 	}
