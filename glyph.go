@@ -25,23 +25,30 @@ const (
 // Gutter is how many cells a line gives to its mark, padding included.
 //
 // Fixed, so that lines with different marks align and a folded continuation has
-// somewhere to hang from. Three, because the widest mark is two cells and one
-// space is the least that reads as separation.
+// somewhere to hang from. Three, because every mark is one cell and two spaces
+// is what the family's CLIs have always put after theirs.
 const Gutter = 3
 
 // glyph carries its own DECLARED width, and that is the important part.
 //
-// No width library can be trusted with 🌫 (U+1F32B). It has Emoji_Presentation
-// = No, so `x/ansi` and `runewidth` both answer 1 — and every terminal the
-// family runs on draws it in two cells. They also disagree with each other on
-// the variation-selector form (2 against 1), which is the tell that this is not
-// a question a table lookup settles. So the width is declared here, verified
-// against real terminals, and measurement libraries are used only on CONTENT,
-// which is ordinary text and where they are reliable.
+// 🌫 (U+1F32B) is the reason. It has Emoji_Presentation = No, so it is exactly
+// the codepoint where sources disagree: `x/ansi` and `runewidth` answer 1, they
+// disagree with EACH OTHER on the variation-selector form (2 against 1), and
+// the usual reflex — "emoji are two cells" — is wrong here. Measured in Ghostty
+// against a column ruler, the family's own terminal draws it in ONE cell, which
+// is what this table records.
 //
-// If a terminal ever proves otherwise, this is one number:
+// So: glyph widths are declared and verified against a real terminal, and
+// measurement libraries are used only on CONTENT, which is ordinary text and
+// where they agree. To re-check a terminal, against a ruler:
 //
-//	printf '123456789\n\U0001F32B|\n'   # the | sits at column 3 if it is 2 cells
+//	printf '123456789\n\U0001F32B|\n✓|\n'
+//
+// The two `|` land in the same column iff the fog is one cell. For a number
+// rather than an eyeball, ask the terminal where its cursor ended up:
+//
+//	stty -echo; printf '\r\U0001F32B\033[6n'; IFS=';' read -rd R _ col; stty echo
+//	echo "$col"   # 2 → one cell, 3 → two
 type glyph struct {
 	utf8  string
 	ascii string
@@ -50,7 +57,7 @@ type glyph struct {
 
 var glyphs = map[Mark]glyph{
 	MarkNone:   {"", "", 0},
-	MarkSay:    {"\U0001F32B", "~", 2}, // fog — the family's signature
+	MarkSay:    {"\U0001F32B", "~", 1}, // fog — the family's signature
 	MarkOK:     {"✓", "+", 1},
 	MarkWarn:   {"⚠", "!", 1},
 	MarkErr:    {"✗", "x", 1},
