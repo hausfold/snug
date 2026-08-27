@@ -21,7 +21,11 @@
           pname = "snug";
           inherit version;
           src = ./.;
-          vendorHash = null; # filled by the first build; see AGENTS.md
+          # Pinned, never null. `null` makes buildGoModule fetch the module
+          # graph at build time, which works on a laptop with network and is a
+          # hard failure in a sandboxed/CI build. Re-take it from the mismatch
+          # error whenever go.sum changes.
+          vendorHash = "sha256-iiJJ2y22zizvc4tVcaDYBuHrmF45hWH68Zt//KoMvyw=";
 
           # Build only the CLI. The library is compiled as its dependency, which
           # is the only thing this derivation has to install.
@@ -36,6 +40,15 @@
           };
         };
       });
+
+      # The overlay consumers take, so `pkgs.snug` is the CLI wherever this
+      # flake is an input — the same shape pounce, perch, trill and scruff
+      # ship, which is what lets a haus module put it on PATH without knowing
+      # it came from a separate flake. The Go PACKAGE needs none of this: a Go
+      # consumer imports `github.com/hausfold/snug` and never sees Nix.
+      overlays.default = final: _prev: {
+        snug = self.packages.${final.stdenv.hostPlatform.system}.default;
+      };
 
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
