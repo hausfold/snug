@@ -22,6 +22,12 @@ in-place repaint quietly depends on and none of ours held.
     nebelung current …/nebelung.json        11m
 ```
 
+Glyph widths are **declared**, not measured. 🌫 (U+1F32B) has
+`Emoji_Presentation = No`, so every source disagrees about it — `x/ansi` and
+`runewidth` say one cell, they contradict each other on the variation-selector
+form, and folklore says two. None of them is a terminal. The table records what
+a terminal actually draws.
+
 Narrow the window and the table sheds its detail column, then its padding, then
 stacks into label/value pairs. It never emits a row it knows will wrap.
 
