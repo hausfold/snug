@@ -50,7 +50,7 @@
           meta = with pkgs.lib; {
             description = "Terminal presentation for the hausfold family";
             homepage = "https://github.com/hausfold/snug";
-            license = licenses.asl20;
+            license = licenses.mit;
             mainProgram = "snug";
             platforms = platforms.unix;
           };
