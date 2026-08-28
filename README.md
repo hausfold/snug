@@ -135,4 +135,4 @@ way to see what it draws.
 
 ## License
 
-Apache 2.0.
+MIT.
