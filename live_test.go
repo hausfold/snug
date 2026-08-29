@@ -114,3 +114,57 @@ func TestNotATerminalEmitsNoEscapes(t *testing.T) {
 		t.Fatalf("want one line per state change (%d), got %d:\n%s", len(jobs), n, buf.String())
 	}
 }
+
+// The cursor comes back on EVERY exit path, and a signal handler is the path
+// that has no *Region to close — it has only the printer. `snug run` installs
+// one because Go's default SIGINT disposition runs no defer at all: without
+// this, a ⌃C through `haus rebuild` or `bench release` left the terminal with
+// no cursor, permanently, and nothing the calling shell can trap fixes it (the
+// coprocess is already dead by the time bash's own INT trap runs).
+func TestCloseLiveRestoresTheCursorWithoutTheRegion(t *testing.T) {
+	term := Term{Width: 80, Height: 24, Profile: NoColor, IsTTY: true, Variant: Nebelung}
+	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term)}
+
+	// Nothing open: a handler that fires before the first frame must not panic
+	// and must not write a stray escape at somebody's shell prompt.
+	p.CloseLive()
+	if got := p.Err.(*bytes.Buffer).String(); got != "" {
+		t.Fatalf("wrote %q with no region open", got)
+	}
+
+	r := p.Live()
+	buf := p.Err.(*bytes.Buffer)
+	if !strings.Contains(buf.String(), "\x1b[?25l") {
+		t.Fatalf("Live did not hide the cursor: %q", buf.String())
+	}
+	buf.Reset()
+
+	p.CloseLive()
+	if !strings.Contains(buf.String(), "\x1b[?25h") {
+		t.Fatalf("CloseLive did not restore the cursor: %q", buf.String())
+	}
+	if !r.closed {
+		t.Fatal("CloseLive left the region open")
+	}
+
+	// Idempotent, because the handler and the deferred Close both run on the
+	// paths where the process is dying slowly enough for both to happen.
+	buf.Reset()
+	p.CloseLive()
+	r.Close()
+	if got := buf.String(); got != "" {
+		t.Fatalf("a second close wrote %q", got)
+	}
+}
+
+// Not a terminal: no cursor escape may reach a file, a pipe or a CI log — on
+// this path as on every other.
+func TestCloseLiveWritesNothingOffATerminal(t *testing.T) {
+	term := Term{Width: 80, Height: 24, Profile: NoColor, IsTTY: false, Variant: Nebelung}
+	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term)}
+	p.Live()
+	p.CloseLive()
+	if got := p.Err.(*bytes.Buffer).String(); got != "" {
+		t.Fatalf("wrote %q with no terminal", got)
+	}
+}

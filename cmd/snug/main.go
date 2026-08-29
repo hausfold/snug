@@ -22,8 +22,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/hausfold/snug"
 )
@@ -111,6 +113,34 @@ func run(p *snug.Printer) int {
 		}
 	}()
 
+	// A ⌃C reaches every process in the terminal's foreground group, this one
+	// included — and Go's default disposition for SIGINT terminates without
+	// running a single defer, so the `region.Close()` above never fires and the
+	// cursor stays hidden on the user's terminal for good. That is the exact
+	// failure the standard's live-region contract names ("the cursor is restored
+	// on every exit path, including SIGINT"), and the caller cannot fix it from
+	// its end: bash's own INT trap runs after the coprocess is already dead.
+	//
+	// So: close the region, then leave with the status a shell expects for that
+	// signal — 128+signum, which is the 130 a ⌃C reports. SIGTERM and SIGHUP take
+	// the same path; a closed terminal is the other way a spinner outlives its
+	// window.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		s := <-sig
+		// FIRST, before anything that can block. `signal.Notify` disables the
+		// default disposition for good, and `CloseLive` takes the printer's
+		// mutex — which the main goroutine holds for the whole of a repaint. A
+		// second ⌃C into a cap-1 channel nobody is reading would then do
+		// NOTHING, turning "the spinner outlived its window" from ugly into
+		// unkillable. Resetting here hands the second signal back to the
+		// kernel's default, which is what a person pressing ⌃C twice means.
+		signal.Reset(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		p.CloseLive()
+		os.Exit(signalExit(s))
+	}()
+
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -158,6 +188,17 @@ func run(p *snug.Printer) int {
 		}
 	}
 	return 0
+}
+
+// signalExit is the status a shell expects for a process that stopped because
+// of a signal: 128+signum, so a ⌃C reports 130. Split out because it is the one
+// part of the handler a test can reach — the registration and the pty round
+// trip are verified by hand (see the PR), and `cmd/snug` has no pty helper.
+func signalExit(s os.Signal) int {
+	if ss, ok := s.(syscall.Signal); ok {
+		return 128 + int(ss)
+	}
+	return 130
 }
 
 func row(state, name, detail string, frame int) snug.Row {
