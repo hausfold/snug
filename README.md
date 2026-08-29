@@ -45,6 +45,26 @@ for {
 }
 ```
 
+A `defer` does not survive a ⌃C: Go's default SIGINT disposition terminates the
+process without running one, so `r.Close()` never fires and the cursor stays
+hidden on the terminal for good. snug will not install a signal handler for you
+— your program owns that policy — so if you open a live region, close it from
+your own handler with `p.CloseLive()`, which is safe with no region open and
+safe to call twice:
+
+```go
+sig := make(chan os.Signal, 1)
+signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+go func() {
+    s := <-sig
+    signal.Reset(os.Interrupt, syscall.SIGTERM) // a second ⌃C must still kill
+    p.CloseLive()
+    os.Exit(128 + int(s.(syscall.Signal)))
+}()
+```
+
+`snug run` does exactly this for shell callers, so a `coproc` needs nothing.
+
 ## For shells
 
 ```sh

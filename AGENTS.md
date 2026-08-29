@@ -77,6 +77,16 @@ The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
   `TruncateLeft` cuts paths at a `/` and includes it, so "the suffix after the
   slash fits" says nothing about whether the slash does. That off-by-one shipped
   once and made one row of a table exactly one cell wider than its neighbours.
+- **A `defer` does not survive SIGINT, and the LIBRARY still must not take it.**
+  Go's default disposition for SIGINT terminates without running one, so
+  `defer r.Close()` — the pattern every Go consumer writes, and the one the
+  README shows — leaves the cursor hidden on the user's terminal for good. The
+  fix is split on purpose: `Printer.CloseLive()` is the seam for a handler that
+  cannot hold the `*Region`, and **only `cmd/snug` installs the handler**. A
+  package that quietly claims SIGINT is a package its importer has to fight, and
+  scruff imports this one. The handler calls `signal.Reset` as its FIRST
+  statement, before `CloseLive` can block on the printer's mutex, or a second ⌃C
+  lands in a channel nobody is reading and the process becomes unkillable.
 
 ## Streams
 

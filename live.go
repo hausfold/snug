@@ -69,6 +69,14 @@ func (r *Region) watch() {
 func (r *Region) Set(rows []Row) {
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
+	// A closed region is done: the cursor is back and the final frame is in
+	// scrollback, so a repaint now would write cursor-up and rows AFTER the
+	// `?25h` that ended it. Only reachable since the binary grew a signal
+	// handler — that handler closes from another goroutine while this one may
+	// be between frames — but it is the caller's contract either way.
+	if r.closed {
+		return
+	}
 	r.rows = rows
 	r.paint()
 }
@@ -91,6 +99,28 @@ func (r *Region) Close() {
 		fmt.Fprint(r.p.Err, "\x1b[?25h")
 	}
 	r.p.live = nil
+}
+
+// CloseLive closes whatever region is open on this printer, if any.
+//
+// It exists for the one caller that cannot hold the *Region: a signal handler.
+// A process killed mid-frame has hidden the cursor and not put it back, which
+// the standard (the workshop's docs/cli-presentation.md, "Live regions") makes
+// a hard requirement precisely because a terminal left with no cursor is the
+// worst thing a spinner can do to you — and Go's default SIGINT disposition
+// runs no defer at all.
+//
+// The library deliberately does NOT install that handler itself: a Go program
+// importing snug owns its own signal policy, and a package that quietly takes
+// SIGINT is a package you have to fight. `snug run` — a process whose whole job
+// is drawing — installs it, and this is what it calls.
+func (p *Printer) CloseLive() {
+	p.mu.Lock()
+	r := p.live
+	p.mu.Unlock()
+	if r != nil {
+		r.Close()
+	}
 }
 
 // above prints scrolling log lines over a region that is still turning. The
