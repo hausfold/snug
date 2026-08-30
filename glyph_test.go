@@ -2,12 +2,12 @@ package snug
 
 import "testing"
 
-// Every mark occupies exactly Gutter cells, so a ✓ line and a 🌫 line start
+// Every mark occupies exactly Gutter cells, so a ✓ line and a ≋ line start
 // their text in the same column and a folded continuation has a fixed indent to
 // hang from. This is the whole reason widths are DECLARED rather than measured:
-// 🌫 (U+1F32B) has Emoji_Presentation = No, so the sources disagree — x/ansi and
-// runewidth say one, they contradict each other on the variation-selector form,
-// and "emoji are two cells" says two. Ghostty draws one. The table wins.
+// four of the marks are East_Asian_Width = Ambiguous, which is one cell here and
+// two under an East-Asian locale, and every width library has a mode for each.
+// A library has no single answer to give. The table does.
 func TestEveryMarkFillsTheGutterExactly(t *testing.T) {
 	term := Term{Width: 80}
 	t.Setenv("LANG", "en_US.UTF-8")

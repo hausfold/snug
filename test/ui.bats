@@ -227,7 +227,7 @@ rows() {
 @test "the alphabet follows the locale, and the gutter is three cells either way" {
   run env LC_ALL=en_US.UTF-8 "$BASH" -c \
     "set -euo pipefail; source '$UI'; ui_glyph g say; printf '[%s]' \"\$g\"; ui_glyph g ok; printf '[%s]\n' \"\$g\""
-  [ "$output" = '[🌫  ][✓  ]' ] || { echo "got: $output"; false; }
+  [ "$output" = '[≋  ][✓  ]' ] || { echo "got: $output"; false; }
 
   # A C-locale terminal turns every mark into three question marks and shears
   # every column after it by two, so the ASCII alphabet is the honest answer.

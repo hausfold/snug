@@ -147,7 +147,7 @@ func (p *Printer) line(m Mark, r Role, format string, a ...any) {
 }
 
 func (p *Printer) render(m Mark, r Role, msg string) []string {
-	// The gutter is three cells whatever the mark is, so a ✓ line and a 🌫 line
+	// The gutter is three cells whatever the mark is, so a ✓ line and a ≋ line
 	// start their text in the same column.
 	//
 	// Under four columns it cannot be: three cells of gutter plus one of text is
