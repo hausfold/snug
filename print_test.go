@@ -9,7 +9,14 @@ import (
 func printerAt(width int, isTTY bool) (*Printer, *bytes.Buffer) {
 	errBuf := &bytes.Buffer{}
 	t := Term{Width: width, Height: 24, Profile: NoColor, IsTTY: isTTY, Variant: Nebelung}
-	return &Printer{Out: &bytes.Buffer{}, Err: errBuf, term: t, theme: NewTheme(t)}, errBuf
+	// Both halves, even though these tests only read the narration one: a
+	// half-built Printer has a nil outTheme, which is a panic waiting for
+	// whoever writes the first test here that touches the report path.
+	return &Printer{
+		Out: &bytes.Buffer{}, Err: errBuf,
+		term: t, theme: NewTheme(t),
+		outTerm: t, outTheme: NewTheme(t),
+	}, errBuf
 }
 
 // A stream with no window is not folded.

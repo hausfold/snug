@@ -156,7 +156,17 @@ func (t Term) Prose() int {
 // Never the full width: a line whose width EQUALS the terminal's leaves the
 // cursor past the edge and the terminal wraps it anyway. Every live region in
 // the family broke on exactly that off-by-one before this existed.
+//
+// A stream that is NOT a terminal has no last column to stay inside, and gets
+// the same answer Prose gives for the same reason: 80 is not a measurement, it
+// is `tput cols` one layer up. The off-by-one is protection against a WINDOW
+// wrapping, and a pipe does not wrap — so budgeting a table to 79 cells for one
+// cuts paths with an ellipsis out of the stream someone is about to grep, and
+// truncates a captured report to a width nobody chose.
 func (t Term) Avail() int {
+	if !t.IsTTY {
+		return NoFold
+	}
 	if t.Width < 1 {
 		return 1
 	}

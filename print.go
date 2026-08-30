@@ -13,15 +13,24 @@ import (
 // The stream rule is a family contract, not a style choice: STDOUT CARRIES DATA
 // ONLY. Every diagnostic, prompt and progress line goes to stderr, because
 // callers do `cd "$(scruff child …)"` and hooks read paths off stdout. Say/Warn/
-// Fail therefore write to Err; Data is the only thing that writes to Out.
+// Fail therefore write to Err; Data and PrintData are the only things that
+// write to Out.
+//
+// So a printer measures BOTH streams, separately, and that is not symmetry for
+// its own sake. A report drawn on stdout has to be budgeted, gated and painted
+// for stdout: ask stderr how wide the window is and a TTY stdout beside a
+// redirected stderr draws plain, while a piped stdout beside a live stderr
+// draws escapes into the pipe. One stream, one question, one answer.
 type Printer struct {
-	Out io.Writer // data — a path, JSON, the thing a caller captures
+	Out io.Writer // data — a path, JSON, the report a caller captures
 	Err io.Writer // everything a human reads
 
-	mu    sync.Mutex
-	term  Term
-	theme *Theme
-	live  *Region
+	mu       sync.Mutex
+	term     Term // measured from Err — the narration stream
+	theme    *Theme
+	outTerm  Term // measured from Out — the stream a REPORT lands on
+	outTheme *Theme
+	live     *Region
 }
 
 // NewPrinter measures the terminal from Err — the stream the human is reading —
@@ -31,15 +40,37 @@ func NewPrinter() *Printer { return NewPrinterOn(os.Stdout, os.Stderr) }
 // NewPrinterOn is NewPrinter with the streams given, for tests and for callers
 // that have already redirected.
 func NewPrinterOn(out, errw io.Writer) *Printer {
-	t := Term{Width: 80, Height: 24, Profile: NoColor}
-	if f, ok := errw.(*os.File); ok {
-		t = DetectTerm(f)
+	et, ot := measure(errw), measure(out)
+	return &Printer{
+		Out: out, Err: errw,
+		term: et, theme: NewTheme(et),
+		outTerm: ot, outTheme: NewTheme(ot),
 	}
-	return &Printer{Out: out, Err: errw, term: t, theme: NewTheme(t)}
 }
 
-// Term is the current snapshot. Cheap; it is not re-measured per call.
+// measure reads one stream's window, or answers for a stream that has none.
+//
+// The zero IsTTY is the load-bearing half: everything downstream that asks
+// "should this be folded, truncated or painted?" keys on it, and a writer that
+// is not a file has no window by construction.
+func measure(w io.Writer) Term {
+	if f, ok := w.(*os.File); ok {
+		return DetectTerm(f)
+	}
+	return Term{Width: 80, Height: 24, Profile: NoColor}
+}
+
+// Term is the current snapshot of the NARRATION stream. Cheap; it is not
+// re-measured per call.
 func (p *Printer) Term() Term { return p.term }
+
+// OutTerm is the same snapshot for the DATA stream.
+//
+// It is exported because Term answers about Err, so a caller composing a report
+// on stdout that asked Term how wide it was would be told about the other
+// stream — correct exactly as often as the two happen to be the same terminal,
+// and silently wrong the rest of the time.
+func (p *Printer) OutTerm() Term { return p.outTerm }
 
 // Theme is the resolved palette, for callers composing their own lines.
 func (p *Printer) Theme() *Theme { return p.theme }
@@ -52,6 +83,13 @@ func (p *Printer) Resize() {
 	if f, ok := p.Err.(*os.File); ok {
 		p.term = DetectTerm(f)
 		p.theme = NewTheme(p.term)
+	}
+	// Both, because SIGWINCH is about the WINDOW and a report on stdout is
+	// drawn in it too. Re-measuring only the stream that happens to be narrating
+	// is how a resized table keeps the width it had at startup.
+	if f, ok := p.Out.(*os.File); ok {
+		p.outTerm = DetectTerm(f)
+		p.outTheme = NewTheme(p.outTerm)
 	}
 }
 
@@ -75,7 +113,8 @@ func (p *Printer) Info(format string, a ...any) { p.line(MarkInfo, Muted, format
 func (p *Printer) Hint(format string, a ...any) { p.line(MarkHint, Muted, format, a...) }
 
 // Data writes to stdout, unfolded and unpainted. Reserve it for what a caller
-// captures — a path, a JSON document, a rev.
+// captures — a path, a JSON document, a rev. For a report with columns, reach
+// for PrintData instead: it lands on the same stream and gets a budget.
 func (p *Printer) Data(format string, a ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

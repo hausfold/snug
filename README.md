@@ -38,12 +38,29 @@ p := snug.NewPrinter()
 p.Say("resolving %d inputs", n)
 p.OK("nebelung is current")
 
+p.PrintData(snug.Table{ // → stdout, budgeted for stdout
+    Indent: 3,
+    Cols: []snug.Col{
+        {Head: "repo", Min: 6, Weight: 2, Role: snug.Subject},
+        {Head: "path", Min: 10, Weight: 4, Role: snug.Path, Cut: snug.CutLeft},
+    },
+    Rows: rows,
+})
+
 r := p.Live()
 defer r.Close()
 for {
     r.Set(rows)     // repaints in place; SIGWINCH is handled
 }
 ```
+
+A **report** is the thing the user ran the command for — `bench status`, the
+`scruff` listing — and it belongs on stdout so `| less` carries it whole.
+`PrintData` puts it there and measures *that* stream to do it: budget a report
+from stderr and a TTY stdout beside a redirected stderr draws plain, while a
+piped stdout beside a live stderr draws escapes into the pipe. `Print` is the
+other half — a table that is part of what the tool is *saying*, on stderr with
+`Say` and `Warn`.
 
 A `defer` does not survive a ⌃C: Go's default SIGINT disposition terminates the
 process without running one, so `r.Close()` never fires and the cursor stays
