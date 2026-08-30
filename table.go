@@ -1,6 +1,7 @@
 package snug
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -246,9 +247,43 @@ func cut(s string, w int, side Side, tail string) string {
 	}
 }
 
-// Print renders the table onto the printer's Err stream.
+// Print renders the table onto the printer's Err stream — the human one, beside
+// Say and Warn. Use it for a table that is part of what the tool is SAYING, and
+// it will scroll above an open live region like any other line.
 func (p *Printer) Print(t Table) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.writeLines(t.Render(p.term, p.theme))
+}
+
+// PrintData renders the table onto the printer's Out stream, budgeted, gated
+// and painted for THAT stream.
+//
+// A report is not a diagnostic. The `scruff` listing and `bench status`'s tables
+// are the thing the user ran the command for rather than the tool talking about
+// it, and the family keeps them on fd 1 so `bench status | less` carries them
+// whole while the narration stays on fd 2. Print would put them on the wrong
+// side of that split.
+//
+// Measuring Out is the whole reason this is a method and not four lines in each
+// caller. `bench` had to carry two gates asking about two streams to get this
+// right in bash, and wrote down the one edge it still lost: a TTY stdout with a
+// redirected stderr drew plain. Here the report asks its own stream.
+//
+// Close any live region first. Like Data, and unlike Print, this does not
+// cooperate with one — and when Out and Err are the same terminal it is
+// destructive rather than merely uncooperative: the region's next repaint walks
+// up `painted` lines and clears downward from a cursor the report has since
+// moved, so it erases the report the user actually ran the command for.
+//
+// That is not an oversight to fix later. The region's arithmetic counts the
+// lines IT wrote to Err, and no arithmetic makes a foreign write to another
+// descriptor land where a repaint expects to find its own. A command draws a
+// region or a report, not both; `p.CloseLive()` is how it stops drawing one.
+func (p *Printer) PrintData(t Table) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, l := range t.Render(p.outTerm, p.outTheme) {
+		fmt.Fprintln(p.Out, l)
+	}
 }

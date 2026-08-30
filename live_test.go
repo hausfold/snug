@@ -102,7 +102,7 @@ func TestTiersShedTheDetailBeforeTheName(t *testing.T) {
 func TestNotATerminalEmitsNoEscapes(t *testing.T) {
 	var buf bytes.Buffer
 	term := Term{Width: 80, Height: 24, Profile: NoColor, IsTTY: false}
-	p := &Printer{Out: &bytes.Buffer{}, Err: &buf, term: term, theme: NewTheme(term)}
+	p := &Printer{Out: &bytes.Buffer{}, Err: &buf, term: term, theme: NewTheme(term), outTerm: term, outTheme: NewTheme(term)}
 	r := p.Live()
 	r.Set(jobs)
 	r.Set(jobs) // a second identical frame prints nothing: state-change only
@@ -123,7 +123,7 @@ func TestNotATerminalEmitsNoEscapes(t *testing.T) {
 // coprocess is already dead by the time bash's own INT trap runs).
 func TestCloseLiveRestoresTheCursorWithoutTheRegion(t *testing.T) {
 	term := Term{Width: 80, Height: 24, Profile: NoColor, IsTTY: true, Variant: Nebelung}
-	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term)}
+	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term), outTerm: term, outTheme: NewTheme(term)}
 
 	// Nothing open: a handler that fires before the first frame must not panic
 	// and must not write a stray escape at somebody's shell prompt.
@@ -161,7 +161,7 @@ func TestCloseLiveRestoresTheCursorWithoutTheRegion(t *testing.T) {
 // this path as on every other.
 func TestCloseLiveWritesNothingOffATerminal(t *testing.T) {
 	term := Term{Width: 80, Height: 24, Profile: NoColor, IsTTY: false, Variant: Nebelung}
-	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term)}
+	p := &Printer{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, term: term, theme: NewTheme(term), outTerm: term, outTheme: NewTheme(term)}
 	p.Live()
 	p.CloseLive()
 	if got := p.Err.(*bytes.Buffer).String(); got != "" {
