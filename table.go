@@ -270,11 +270,16 @@ func (p *Printer) Print(t Table) {
 // right in bash, and wrote down the one edge it still lost: a TTY stdout with a
 // redirected stderr drew plain. Here the report asks its own stream.
 //
-// Like Data, and unlike Print, it does not cooperate with an open live region.
-// That is not an oversight to fix later: the region's arithmetic counts the
+// Close any live region first. Like Data, and unlike Print, this does not
+// cooperate with one — and when Out and Err are the same terminal it is
+// destructive rather than merely uncooperative: the region's next repaint walks
+// up `painted` lines and clears downward from a cursor the report has since
+// moved, so it erases the report the user actually ran the command for.
+//
+// That is not an oversight to fix later. The region's arithmetic counts the
 // lines IT wrote to Err, and no arithmetic makes a foreign write to another
 // descriptor land where a repaint expects to find its own. A command draws a
-// region or a report, not both.
+// region or a report, not both; `p.CloseLive()` is how it stops drawing one.
 func (p *Printer) PrintData(t Table) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

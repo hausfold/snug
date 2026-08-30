@@ -28,7 +28,10 @@ own file (`CLAUDE.md` here is the `@AGENTS.md` import and nothing else).
 Not "should rarely" — may not, at any width, in any tier, including the
 fallbacks. A line whose width *equals* the terminal's leaves the cursor past the
 edge and the terminal wraps it anyway, which is why `Term.Avail()` is
-`Width - 1` and not `Width`.
+`Width - 1` and not `Width` — on a terminal. A stream with no window has no last
+column to stay inside, and gets `NoFold`, exactly as `Prose()` and
+`share/ui.sh`'s `ui_measure` already do: fitting a pipe to 80 cells is the
+`tput cols` mistake one layer up.
 
 Every defect this library was written for is a violation of that rule:
 
@@ -92,8 +95,16 @@ The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
 
 **Stdout carries DATA only.** Every diagnostic, prompt and progress line goes to
 stderr, because callers do `cd "$(scruff child …)"` and hooks read paths off
-stdout. `Say`/`Warn`/`Fail` write to `Err`; `Data` is the only thing that writes
-to `Out`.
+stdout. `Say`/`Warn`/`Fail` write to `Err`; `Data` and `PrintData` are the only
+things that write to `Out`.
+
+A **report** — the table a user ran the command for, rather than the tool
+talking about it — is data, so it goes to `Out` through `PrintData`, which
+measures `Out` to do it. `Print` is the other half, for a table that is part of
+what the tool is *saying*. Geometry and palette always come from the stream a
+line lands on: ask the other one and a TTY stdout beside a redirected stderr
+draws plain, while a piped stdout beside a live stderr draws escapes into the
+pipe.
 
 This is also why `snug run` works as a bash `coproc`: bash pipes stdin and
 stdout and leaves stderr on the terminal, which is exactly the split this wants.

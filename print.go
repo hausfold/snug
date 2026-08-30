@@ -72,8 +72,18 @@ func (p *Printer) Term() Term { return p.term }
 // and silently wrong the rest of the time.
 func (p *Printer) OutTerm() Term { return p.outTerm }
 
-// Theme is the resolved palette, for callers composing their own lines.
+// Theme is the resolved palette of the NARRATION stream, for callers composing
+// their own lines.
 func (p *Printer) Theme() *Theme { return p.theme }
+
+// OutTheme is the same palette for the DATA stream, and it is exported for the
+// same reason OutTerm is — more urgently, because getting it wrong is visible in
+// the output rather than only in the layout. A caller composing a report by hand
+// from OutTerm's geometry and Theme's colour writes escapes into a pipe the
+// moment stderr is a terminal and stdout is not, which is the exact failure
+// PrintData exists to make unrepresentable. Geometry and palette come from the
+// same stream or from neither.
+func (p *Printer) OutTheme() *Theme { return p.outTheme }
 
 // Resize re-measures the window. Call it from a SIGWINCH handler; Live does it
 // for you while a region is open.
