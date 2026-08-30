@@ -55,14 +55,22 @@ The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
   Only `TIOCGWINSZ` tracks a resize, which is what `x/term` asks. In a shell,
   that is `stty size`, read from `/dev/tty` and not `<&1`, because inside `$( )`
   fd 1 is the substitution's pipe.
-- **No width library can be trusted with 🌫.** U+1F32B has
-  `Emoji_Presentation = No`, so `x/ansi` and `runewidth` both answer **1** while
-  every terminal draws it in **two** cells — and the two libraries disagree with
-  each other on the variation-selector form. Glyph widths are therefore
-  **declared** in `glyph.go` and verified against real terminals; measurement
-  libraries are used only on *content*, which is ordinary text and where they
-  are reliable. To check a terminal: `printf '123456789\n\U0001F32B|\n'` — the
-  `|` sits at column 3 if the glyph is two cells.
+- **No width library can be trusted with a mark, emoji or not.** Taking the
+  emoji-presentation glyphs out of the table did not fix this, because the
+  hazard is `East_Asian_Width`, in two shapes. `ⓘ` (U+24D8), `–` (U+2013), `·`
+  (U+00B7) — and `…` (U+2026), the Ellipsis rather than a mark — are
+  **Ambiguous**: one cell in a Western locale, **two** under an East-Asian one,
+  and `x/ansi` and `runewidth` each expose a mode for each answer, so neither
+  has a single one to give. `⚠` (U+26A0) is the other: `Emoji = Yes` and one
+  cell bare, two as the emoji-presentation sequence `U+26A0 U+FE0F`, which is
+  why the table holds bare codepoints and a caller must never append a
+  variation selector to a mark. Glyph widths are therefore **declared** in
+  `glyph.go` and verified against real terminals; measurement libraries are used
+  only on *content*, which is ordinary text and where they are reliable. To
+  check a terminal, hold a mark against a ruler and read the DIGITS — another
+  mark is no reference, since a locale that doubles one Ambiguous glyph doubles
+  them all: `printf '123456789\n\u24D8|\n'` — the `|` sits at column 3 if the
+  glyph is two cells.
 - **Choose the tier from the WINDOW, then clamp the column to the CONTENT.**
   Never the other way round. Clamping first and testing the clamped value asks
   *"is the longest name short?"* when it means *"is there room?"* — and a CI run

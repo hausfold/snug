@@ -16,7 +16,7 @@ func TestNeverWiderThanAsked(t *testing.T) {
 		"/Users/you/code/workshop/haus/modules/core/haus.sh",
 		"a", "", "//", "/a/b/c/d/e/f/g",
 		"名前が長いジョブ", // wide cells
-		"🌫 fog",
+		"🐾 paws",   // an emoji in CONTENT: measured, unlike a mark
 	}
 	for _, s := range subjects {
 		for w := range 60 {

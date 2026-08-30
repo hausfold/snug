@@ -285,18 +285,20 @@ ui_paint_role() {
 # The glyph is load-bearing and the colour is not: every role has to survive
 # NO_COLOR, so the glyph carries the meaning and the colour is the courtesy.
 #
-# Widths are DECLARED, and that is the important part. 🌫 (U+1F32B) is the
-# reason: it has Emoji_Presentation = No, so it is exactly the codepoint where
-# sources disagree — x/ansi and runewidth answer 1, they disagree with each
-# other on the variation-selector form, and the reflex "emoji are two cells" is
-# wrong here. Measured in Ghostty against a column ruler, the family's own
-# terminal draws it in ONE cell, which is what snug's glyph.go records and what
-# this matches. To re-check a terminal, and get a number rather than an eyeball:
+# Widths are DECLARED, and that is the important part. No mark defaults to emoji
+# presentation — but that alone does not make measurement safe, because the
+# hazard is East_Asian_Width. `ⓘ` (U+24D8), `–` (U+2013), `·` (U+00B7) and the
+# truncation `…` (U+2026) are Ambiguous: one cell in a Western locale, TWO under
+# an East-Asian one, and every width library has a mode for each. `⚠` (U+26A0)
+# is the other shape — Emoji = Yes, one cell bare, two as the emoji-presentation
+# sequence U+26A0 U+FE0F, which is why the table holds bare codepoints and never
+# a sequence. These match snug's glyph.go, verified against a real terminal. To
+# re-check one, and get a number rather than an eyeball:
 #
-#   stty -echo; printf '\r\U0001F32B\033[6n'; IFS=';' read -rd R _ col; stty echo
+#   stty -echo; printf '\r\u24D8\033[6n'; IFS=';' read -rd R _ col; stty echo
 #   echo "$col"   # 2 → one cell, 3 → two
 declare -gA UI__GLYPH_UTF8=(
-  [say]=$'\U0001F32B' [ok]='✓' [warn]='⚠' [err]='✗'
+  [say]=$'\u224B' [ok]='✓' [warn]='⚠' [err]='✗'
   [info]='ⓘ' [skip]='–' [bullet]='·' [hint]='↳'
 )
 declare -gA UI__GLYPH_ASCII=(
@@ -313,7 +315,7 @@ UI__SPIN_ASCII=('|' '/' '-' $'\\')
 
 # ui_glyph <var> <mark> — the mark, padded to the gutter, into <var>.
 #
-# Padding here rather than at the call site is what keeps a ✓ line and a 🌫 line
+# Padding here rather than at the call site is what keeps a ✓ line and a ≋ line
 # starting their text in the same column.
 ui_glyph() {
   local __ui_g
@@ -497,7 +499,7 @@ ui__fold_one() {
 ui__line() { # ui__line <mark> <role> <text>
   local mark budget gut head pad i=0 painted
   # The gutter is fixed at three cells whatever the mark is, so a ✓ line and a
-  # 🌫 line start their text in the same column and a folded continuation has
+  # ≋ line start their text in the same column and a folded continuation has
   # somewhere to hang from.
   #
   # Under four columns it cannot be: three cells of gutter plus one of text is

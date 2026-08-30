@@ -13,7 +13,7 @@ screen's lines are equal by construction — which is the property every
 in-place repaint quietly depends on and none of ours held.
 
 ```
-🌫  snug — every mark and role, on this terminal
+≋   snug — every mark and role, on this terminal
 ✓   ok · something current, healthy, passed
 ⚠   warn · something stale, degraded, wanting attention
 ✗   fail · something that failed, was refused, or is missing
@@ -22,11 +22,14 @@ in-place repaint quietly depends on and none of ours held.
     nebelung current …/nebelung.json        11m
 ```
 
-Glyph widths are **declared**, not measured. 🌫 (U+1F32B) has
-`Emoji_Presentation = No`, so every source disagrees about it — `x/ansi` and
-`runewidth` say one cell, they contradict each other on the variation-selector
-form, and folklore says two. None of them is a terminal. The table records what
-a terminal actually draws.
+Glyph widths are **declared**, not measured. No mark defaults to emoji
+presentation, and that is not the same guarantee as safety: `ⓘ`, `–`, `·` and
+the truncation `…` are `East_Asian_Width = Ambiguous`, so they are one cell in
+a Western locale and two under an East-Asian one — and every width library
+ships a mode for each, which means a library has no single answer to give. `⚠`
+is one cell bare and two as the emoji-presentation sequence `U+26A0 U+FE0F`, so
+the table holds bare codepoints. None of that is a terminal. The table records
+what a terminal actually draws.
 
 Narrow the window and the table sheds its detail column, then its padding, then
 stacks into label/value pairs. It never emits a row it knows will wrap.

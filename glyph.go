@@ -31,23 +31,36 @@ const Gutter = 3
 
 // glyph carries its own DECLARED width, and that is the important part.
 //
-// 🌫 (U+1F32B) is the reason. It has Emoji_Presentation = No, so it is exactly
-// the codepoint where sources disagree: `x/ansi` and `runewidth` answer 1, they
-// disagree with EACH OTHER on the variation-selector form (2 against 1), and
-// the usual reflex — "emoji are two cells" — is wrong here. Measured in Ghostty
-// against a column ruler, the family's own terminal draws it in ONE cell, which
-// is what this table records.
+// No mark DEFAULTS to emoji presentation — none has Emoji_Presentation = Yes,
+// which is the property an emoji's disputed width comes from. That is a
+// narrower claim than "no emoji": `⚠` (U+26A0) carries Emoji = Yes and is here
+// anyway, and it is one of the two reasons the widths are still declared.
+//
+// Because dropping the emoji did NOT make measurement safe. The hazard is
+// East_Asian_Width, and it survives in two shapes:
+//
+//   - `ⓘ` (U+24D8), `–` (U+2013) and `·` (U+00B7) — and `…` (U+2026), which is
+//     not a mark but is the Ellipsis every truncation ends in — are
+//     East_Asian_Width = Ambiguous. That is one cell in a Western locale and
+//     TWO under an East-Asian one, and both x/ansi and runewidth expose a mode
+//     for each answer, so neither has a single one to give.
+//   - `⚠` (U+26A0) is the other. Bare it is one cell, but the
+//     emoji-presentation sequence U+26A0 U+FE0F is two. The table stores bare
+//     codepoints and never a sequence, and a caller that appends a variation
+//     selector to a mark has silently doubled it.
 //
 // So: glyph widths are declared and verified against a real terminal, and
 // measurement libraries are used only on CONTENT, which is ordinary text and
-// where they agree. To re-check a terminal, against a ruler:
+// where they agree. To re-check a terminal, hold a mark against the ruler —
+// the digits are the answer, not the other mark, since a locale that doubles
+// one Ambiguous glyph doubles them all and leaves any two of them aligned:
 //
-//	printf '123456789\n\U0001F32B|\n✓|\n'
+//	printf '123456789\nⓘ|\n'
 //
-// The two `|` land in the same column iff the fog is one cell. For a number
-// rather than an eyeball, ask the terminal where its cursor ended up:
+// The `|` sits at column 2 iff the mark is one cell. For a number rather than
+// an eyeball, ask the terminal where its cursor ended up:
 //
-//	stty -echo; printf '\r\U0001F32B\033[6n'; IFS=';' read -rd R _ col; stty echo
+//	stty -echo; printf '\r\u24D8\033[6n'; IFS=';' read -rd R _ col; stty echo
 //	echo "$col"   # 2 → one cell, 3 → two
 type glyph struct {
 	utf8  string
@@ -57,7 +70,7 @@ type glyph struct {
 
 var glyphs = map[Mark]glyph{
 	MarkNone:   {"", "", 0},
-	MarkSay:    {"\U0001F32B", "~", 1}, // fog — the family's signature
+	MarkSay:    {"\u224B", "~", 1}, // the family's signature: the ascii `~`, tripled
 	MarkOK:     {"✓", "+", 1},
 	MarkWarn:   {"⚠", "!", 1},
 	MarkErr:    {"✗", "x", 1},
@@ -95,7 +108,7 @@ func (t Term) Spin(n int) string {
 
 // Glyph returns the mark and its declared width, padded to Gutter.
 //
-// Padding here rather than at the call site is what keeps a ✓ line and a 🌫 line
+// Padding here rather than at the call site is what keeps a ✓ line and a ≋ line
 // starting their text in the same column.
 func (t Term) Glyph(m Mark) (string, int) {
 	g, ok := glyphs[m]
