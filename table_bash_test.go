@@ -65,6 +65,10 @@ var bashRole = map[Role]string{
 
 var bashCut = map[Side]string{CutRight: "right", CutLeft: "left", CutNever: "never"}
 
+var bashProfile = map[Profile]string{
+	NoColor: "none", ANSI16: "16", ANSI256: "256", TrueColor: "truecolor",
+}
+
 // renderBash runs ui.sh's table over the same spec at every width in widths,
 // in ONE bash process, and returns its lines per width.
 //
@@ -72,7 +76,7 @@ var bashCut = map[Side]string{CutRight: "right", CutLeft: "left", CutNever: "nev
 // test/ui.bats keep: the arithmetic under test does not care which fork it runs
 // in, and two hundred forks would put this test in the "run it later" bucket
 // where it stops being run at all.
-func renderBash(t *testing.T, tbl Table, widths []int) map[int][]string {
+func renderBash(t *testing.T, tbl Table, widths []int, prof Profile) map[int][]string {
 	t.Helper()
 	sh := bashCmd(t)
 	ui, err := filepath.Abs("share/ui.sh")
@@ -102,27 +106,32 @@ func renderBash(t *testing.T, tbl Table, widths []int) map[int][]string {
 	}
 
 	// UI_TTY / UI_COLS / UI_AVAIL by hand rather than by a pty, the same way the
-	// Go tests construct a Term and test/ui.bats drives its own sweeps. The
-	// palette is resolved to `none` on both prefixes so this compares LAYOUT;
-	// the colours have their own test, on both sides.
+	// Go tests construct a Term and test/ui.bats drives its own sweeps.
+	//
+	// At `none` this compares LAYOUT and nothing else, which is most of what can
+	// disagree. At `256` it compares the finished, painted line — the only way
+	// to see that both halves picked the same ROLE for a cell, since a role with
+	// the colour off leaves no trace in the output at all.
 	script := fmt.Sprintf(`
 set -euo pipefail
-source %s
+source %[1]s
 UI_TTY=1; UI_OUT_TTY=1
-UI_PROFILE=none; UI_OUT_PROFILE=none
-ui__resolve_palette none UI_
-ui__resolve_palette none UI_OUT_
-for w in %s; do
+UI_PROFILE=%[4]s; UI_OUT_PROFILE=%[4]s
+ui__resolve_palette %[4]s UI_
+ui__resolve_palette %[4]s UI_OUT_
+for w in %[2]s; do
   UI_COLS=$w; UI_AVAIL=$(( w - 1 )); UI_OUT_AVAIL=$(( w - 1 )); UI_PROSE=$w
   ui_table_clear
-%s
+%[3]s
   printf '=== %%s\n' "$w"
-  ui_table_data %d %d
+  ui_table_data %[5]d %[6]d
 done
-`, bashQuote(ui), strings.Join(ws, " "), spec.String(), tbl.Indent, header)
+`, bashQuote(ui), strings.Join(ws, " "), spec.String(), bashProfile[prof], tbl.Indent, header)
 
 	cmd := exec.Command(sh, "-c", script)
-	cmd.Env = append(os.Environ(), "SNUG_ASCII=1", "NO_COLOR=", "LC_ALL=C")
+	// LC_ALL=C with SNUG_ASCII=1 so one byte is one character is one cell on the
+	// bash side, which is what makes `${#s}` a cell count there.
+	cmd.Env = append(os.Environ(), "SNUG_ASCII=1", "LC_ALL=C")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("ui.sh: %v\n%s", err, out)
@@ -168,6 +177,23 @@ func TestBashTableMatchesGo(t *testing.T) {
 				{"nebelung", "main", "", "/Users/you/code/workshop/nebelung"},
 			},
 		},
+		// A column whose colour changes per ROW, which is what `bench status`'s
+		// dirty count and its ↑/↓ are. The tag is not content: it must not be
+		// measured, must not be drawn, and must survive a truncation of the
+		// text beside it.
+		"a colour that changes per row": {
+			Indent: 3,
+			Cols: []Col{
+				{Head: "repo", Min: 6, Weight: 1, Role: Subject},
+				{Head: "dirty", Min: 5, Weight: 1, Role: Muted},
+				{Head: "vs origin", Min: 6, Weight: 2, Role: Muted},
+			},
+			Rows: [][]string{
+				{"nebelung", Cell(OK, "."), "^0 v0"},
+				{"haus", Cell(Warn, "3 files"), Cell(Warn, "^2 v0")},
+				{"workshop", Cell(OK, "."), Cell(Warn, "^11 v0")},
+			},
+		},
 		// A `never` column beside one that folds: the duration is dropped
 		// whole rather than abbreviated, and the two halves have to agree on
 		// exactly which width that happens at.
@@ -191,24 +217,30 @@ func TestBashTableMatchesGo(t *testing.T) {
 	}
 
 	for name, tbl := range cases {
-		t.Run(name, func(t *testing.T) {
-			bash := renderBash(t, tbl, widths)
-			for _, w := range widths {
-				term := Term{Width: w, Profile: NoColor, IsTTY: true}
-				want := tbl.Render(term, NewTheme(term))
-				got := bash[w]
-				// Render returns nil for an empty table; bash returns no lines.
-				if len(want) != len(got) {
-					t.Fatalf("width %d: go drew %d lines, ui.sh drew %d\ngo:\n%s\nui.sh:\n%s",
-						w, len(want), len(got), strings.Join(want, "\n"), strings.Join(got, "\n"))
-				}
-				for i := range want {
-					if want[i] != got[i] {
-						t.Fatalf("width %d, line %d:\n go:    %q\n ui.sh: %q", w, i, want[i], got[i])
-					}
-				}
+		for _, prof := range []Profile{NoColor, ANSI256} {
+			t.Run(name+"/"+bashProfile[prof], func(t *testing.T) {
+				diffOneTable(t, tbl, widths, prof)
+			})
+		}
+	}
+}
+
+func diffOneTable(t *testing.T, tbl Table, widths []int, prof Profile) {
+	bash := renderBash(t, tbl, widths, prof)
+	for _, w := range widths {
+		term := Term{Width: w, Profile: prof, IsTTY: true}
+		want := tbl.Render(term, NewTheme(term))
+		got := bash[w]
+		// Render returns nil for an empty table; bash returns no lines.
+		if len(want) != len(got) {
+			t.Fatalf("width %d: go drew %d lines, ui.sh drew %d\ngo:\n%s\nui.sh:\n%s",
+				w, len(want), len(got), strings.Join(want, "\n"), strings.Join(got, "\n"))
+		}
+		for i := range want {
+			if want[i] != got[i] {
+				t.Fatalf("width %d, line %d:\n go:    %q\n ui.sh: %q", w, i, want[i], got[i])
 			}
-		})
+		}
 	}
 }
 
@@ -221,7 +253,7 @@ func TestBashTableNeverReachesTheLastColumn(t *testing.T) {
 	for w := 2; w <= 200; w++ {
 		widths = append(widths, w)
 	}
-	for w, lines := range renderBash(t, demoTable(), widths) {
+	for w, lines := range renderBash(t, demoTable(), widths, NoColor) {
 		for _, l := range lines {
 			if Width(l) > w-1 {
 				t.Fatalf("width %d: ui.sh drew %q, %d cells, limit %d", w, l, Width(l), w-1)

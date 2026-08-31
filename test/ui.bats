@@ -561,3 +561,38 @@ PYEOF
   [ "${#lines[@]}" -eq 1 ] || { echo "a redirected report was stacked: $output"; false; }
   [[ "$output" == *"$long"* ]] || { echo "a redirected report was cut: $output"; false; }
 }
+
+@test "a cell can carry a colour of its own, and the tag never reaches the terminal" {
+  # `bench status`'s dirty count is amber only when it is not zero, and its ↑
+  # stays quiet while the repo is pushed: a role per ROW, inside a column that
+  # has one of its own. The alternative is what bench did before there was one —
+  # build the row with the escapes already in it, and have the padding count
+  # them.
+  #
+  # A file rather than a `-c` string: the snippet needs both quote characters.
+  cat >"$BATS_TEST_TMPDIR/cell.sh" <<'EOS'
+set -euo pipefail
+source "$UI"
+UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=256
+ui__resolve_palette; ui__resolve_palette 256 UI_OUT_
+UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+ui_col repo  4 1 subject right
+ui_col dirty 5 1 muted   right
+ui_cell d warn "3 files"
+ui_trow haus "$d"
+ui_trow nebelung "."
+out="$(ui_table_data 0 0)"
+case "$out" in *"$UI__CELL_MARK"*) echo TAG-DRAWN ;; esac
+while IFS= read -r l; do
+  case "$l" in
+    *haus*)     case "$l" in *"$UI_OUT_WARN"*)  echo DIRTY-IS-WARN ;; esac ;;
+    *nebelung*) case "$l" in *"$UI_OUT_MUTED"*) echo CLEAN-IS-MUTED ;; esac ;;
+  esac
+done <<<"$out"
+EOS
+  run env SNUG_ASCII=1 UI="$UI" "$BASH" "$BATS_TEST_TMPDIR/cell.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *TAG-DRAWN* ]] || { echo "a role tag reached the terminal: $output"; false; }
+  [[ "$output" == *DIRTY-IS-WARN* ]] || { echo "got: $output"; false; }
+  [[ "$output" == *CLEAN-IS-MUTED* ]] || { echo "got: $output"; false; }
+}

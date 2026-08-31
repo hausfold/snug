@@ -25,6 +25,30 @@ const (
 	Field               // a key in a key/value grid
 )
 
+// roleNames is the role's name in the record protocol and in ui.sh, which are
+// the two places a role crosses a process boundary as text.
+var roleNames = map[Role]string{
+	Body: "body", Accent: "accent", OK: "ok", Warn: "warn", Err: "err",
+	Muted: "muted", Subject: "subject", Path: "path", Field: "field",
+}
+
+func (r Role) String() string {
+	if n, ok := roleNames[r]; ok {
+		return n
+	}
+	return "body"
+}
+
+// RoleNamed is the reverse, for a caller reading a role off a wire.
+func RoleNamed(s string) (Role, bool) {
+	for r, n := range roleNames {
+		if n == s {
+			return r, true
+		}
+	}
+	return Body, false
+}
+
 // roleToken maps a role onto the nebelung token it wears.
 //
 // Body is deliberately absent rather than mapped to `text`: painting ordinary

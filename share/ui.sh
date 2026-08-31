@@ -912,10 +912,48 @@ ui_col() {
   return 0
 }
 
+# The ASCII unit separator brackets the role in a cell that overrides its
+# column's — a cell is TEXT here and there is no type to put a role in. Git
+# refuses a control character in a ref name and no path, count or duration the
+# family draws has ever held one; the split fires only on a leading mark, a role
+# this file knows, and a closing mark, so content that somehow contains one is
+# still drawn as itself.
+UI__CELL_MARK=$'\037'
+
+# ui_cell <var> <role> <text> — a cell that carries its own role.
+#
+# Most tables want a role per COLUMN and say so once in `ui_col`; that is what to
+# reach for. This is for the column whose meaning changes per ROW — a dirty count
+# that is amber only when it is not zero, a `↑` that stays quiet while a repo is
+# pushed — where the alternative is what `bench` did before it had one: build the
+# row with the escapes already in it, and discover the padding now counts them.
+ui_cell() {
+  printf -v "$1" '%s%s%s%s' "$UI__CELL_MARK" "$2" "$UI__CELL_MARK" "$3"
+  return 0
+}
+
+# ui__cell_split <role-var> <text-var> <cell> <default-role>
+ui__cell_split() {
+  local c="$3" r t
+  case "$c" in "$UI__CELL_MARK"*"$UI__CELL_MARK"*) ;; *)
+    printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0 ;;
+  esac
+  t="${c#"$UI__CELL_MARK"}"
+  r="${t%%"$UI__CELL_MARK"*}"
+  case "$r" in
+    body | accent | ok | warn | err | muted | subject | path | field) ;;
+    *) printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0 ;;
+  esac
+  printf -v "$1" '%s' "$r"
+  printf -v "$2" '%s' "${t#*"$UI__CELL_MARK"}"
+  return 0
+}
+
 # ui_trow <cell> [cell…] — buffer one row.
 #
 # A cell carries no escapes: colour goes on afterwards, around a finished field,
-# or it is counted as width and shears the column.
+# or it is counted as width and shears the column. A cell that needs a colour of
+# its own says so with `ui_cell`, which is a role and not an escape.
 ui_trow() {
   local IFS=$'\t'
   UI__TROWS+=("$*")
@@ -1023,14 +1061,14 @@ ui__table_stack() {
   local -n __ui_st="$1"
   local avail="$2" pfx="$3"
   local -a cells=()
-  local n i j w v label lbl painted pad
+  local n i j w v role label lbl painted pad
   __ui_st=()
   for n in "${!UI__TROWS[@]}"; do
     [ "$n" -gt 0 ] && __ui_st+=("")
     ui__split cells "${UI__TROWS[$n]}"
     for i in "${!UI__TC_HEAD[@]}"; do
       [ "$i" -lt "${#cells[@]}" ] || continue
-      v="${cells[$i]}"
+      ui__cell_split role v "${cells[$i]}" "${UI__TC_ROLE[$i]}"
       [ -n "$v" ] || continue
       ui_truncate label "${UI__TC_HEAD[$i]} " "$avail" ''
       ui_paint_role lbl field "$label" "$pfx"
@@ -1041,7 +1079,7 @@ ui__table_stack() {
         w="$avail"; [ "$w" -lt 1 ] && w=1
         ui_fold "$w" "$v"
         for j in "${!UI_FOLD[@]}"; do
-          ui_paint_role painted "${UI__TC_ROLE[$i]}" "${UI_FOLD[$j]}" "$pfx"
+          ui_paint_role painted "$role" "${UI_FOLD[$j]}" "$pfx"
           __ui_st+=("$painted")
         done
         continue
@@ -1052,14 +1090,14 @@ ui__table_stack() {
       # three ragged ones.
       if [ "${UI__TC_CUT[$i]}" = left ]; then
         ui_truncate_left v "$v" $(( avail - ${#label} ))
-        ui_paint_role painted "${UI__TC_ROLE[$i]}" "$v" "$pfx"
+        ui_paint_role painted "$role" "$v" "$pfx"
         __ui_st+=("$lbl$painted")
         continue
       fi
       printf -v pad '%*s' "${#label}" ''
       ui_fold $(( avail - ${#label} )) "$v"
       for j in "${!UI_FOLD[@]}"; do
-        ui_paint_role painted "${UI__TC_ROLE[$i]}" "${UI_FOLD[$j]}" "$pfx"
+        ui_paint_role painted "$role" "${UI_FOLD[$j]}" "$pfx"
         if [ "$j" -eq 0 ]; then __ui_st+=("$lbl$painted")
         else __ui_st+=("$pad$painted"); fi
       done
@@ -1087,7 +1125,10 @@ ui__table_render() {
     ui__split cells "$row"
     for (( i = 0; i < cols; i++ )); do
       [ "$i" -lt "${#cells[@]}" ] || continue
-      [ "${#cells[$i]}" -gt "${natural[$i]}" ] && natural[i]="${#cells[$i]}"
+      # The tag is not content and is never drawn, so it is never measured
+      # either: budgeting it reserves cells for something nobody can see.
+      ui__cell_split role v "${cells[$i]}" body
+      [ "${#v}" -gt "${natural[$i]}" ] && natural[i]="${#v}"
     done
   done
 
@@ -1106,12 +1147,13 @@ ui__table_render() {
     ui__split cells "${all[$n]}"
     line="$pad"
     for (( i = 0; i < cols; i++ )); do
-      v=""; [ "$i" -lt "${#cells[@]}" ] && v="${cells[$i]}"
+      v=""; role="${UI__TC_ROLE[$i]}"
+      [ "$i" -lt "${#cells[@]}" ] && ui__cell_split role v "${cells[$i]}" "$role"
       ui__table_cut v "$v" "${widths[$i]}" "${UI__TC_CUT[$i]}"
       # Never pad the last column: trailing spaces are what wrap a row that
       # just fit.
       [ "$i" -lt $(( cols - 1 )) ] && ui_pad v "$v" "${widths[$i]}"
-      role="${UI__TC_ROLE[$i]}"
+      # A head is a head whatever its column paints.
       if [ "$header" = 1 ] && [ "$n" -eq 0 ]; then role=field; fi
       # Colour OUTSIDE the width: an escape counted as width shears the column.
       ui_paint_role v "$role" "$v" "$pfx"

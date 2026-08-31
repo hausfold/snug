@@ -124,6 +124,9 @@ ui_col repo  6 1 subject right     # head, min, weight, role, cut side
 ui_col where 10 2 path   left
 ui_trow bench "$dir"
 ui_table_data 3 1                  # → stdout, budgeted for stdout
+
+ui_cell c warn "3 files"           # a role for ONE cell, where the column's
+ui_trow haus "$c"                  # meaning changes row by row
 ```
 
 `ui_table_data` is `PrintData` and `ui_table` is `Print`, including the part
