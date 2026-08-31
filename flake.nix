@@ -78,6 +78,11 @@
             pkgs.go
             pkgs.gopls
             pkgs.gotools
+            # The bash half has its own linter and its own suite, and CI runs
+            # both in a job the Go toolchain never enters. Without these in
+            # here, `share/ui.sh` is the half you can only test by pushing.
+            pkgs.shellcheck
+            pkgs.bats
           ];
         };
       });

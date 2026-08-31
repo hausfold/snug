@@ -119,12 +119,29 @@ wrapProgram $out/bin/yours --set MY_UI_SH ${snug}/share/ui.sh
 ui_say "resolving inputs"          # → stderr, folded, hung at the gutter
 ui_data "$path"                    # → stdout, untouched
 ui_row run build "12s"; ui_paint   # → a live region, repainted in place
+
+ui_col repo  6 1 subject right     # head, min, weight, role, cut side
+ui_col where 10 2 path   left
+ui_trow bench "$dir"
+ui_table_data 3 1                  # → stdout, budgeted for stdout
+
+ui_cell c warn "3 files"           # a role for ONE cell, where the column's
+ui_trow haus "$c"                  # meaning changes row by row
 ```
+
+`ui_table_data` is `PrintData` and `ui_table` is `Print`, including the part
+that matters: each measures, gates and paints for the stream it lands on, so a
+report keeps its colour on a live stdout beside a redirected stderr and gets
+none on a piped one beside a live terminal.
 
 Same roles, same glyphs, same tiers, same palette — generated from the same
 `TOKENS` list as `palette.go`, so the two halves cannot disagree about a colour.
-Lower fidelity in one place only: it measures characters, not cells, so it is
-honest about ordinary text and hands emoji to the binary. It is deliberately
+A layout cannot be generated the way a palette can, so it is diffed instead:
+`TestBashTableMatchesGo` renders the same columns and rows through both painters
+at every width from too narrow to draw at all up to wider than any content, and
+reds on the first line they disagree about. Lower fidelity in one place only: it
+measures characters, not cells, so it is honest about ordinary text and hands
+emoji to the binary. It is deliberately
 *not* a wrapper around `snug` when snug is present — one fork per **command** is
 the whole economy, and only the caller can see where a command begins.
 

@@ -45,6 +45,44 @@ type Table struct {
 
 const colGap = 1 // one space between columns; two reads as a gutter, not a gap
 
+// cellMark brackets the role in a cell that overrides its column's.
+//
+// U+001F, the ASCII unit separator, because a cell is TEXT on both sides of
+// this library and the bash half has no type to put a role in. Git refuses a
+// control character in a ref name, and no path, count or duration the family
+// draws has ever held one — but the split only fires on a leading mark, a role
+// this package knows, and a closing mark, so content that happens to contain
+// one is still drawn as itself.
+const cellMark = "\x1f"
+
+// Cell tags one cell with a role of its own, overriding its column's.
+//
+// Most tables want a role per COLUMN and say so once; `Col.Role` is that, and
+// it is what a caller should reach for. This is for the column whose meaning
+// changes per row — a dirty count that is amber when it is not zero, a `↑` that
+// stays quiet while a repo is pushed — where the alternative is what `bench`
+// did before it had one: build the row with the escapes already in it, and
+// discover that the padding now counts them.
+func Cell(r Role, s string) string { return cellMark + r.String() + cellMark + s }
+
+// splitCell separates a tagged cell into its role and its text. An untagged
+// cell — every cell in most tables — is its column's role and itself.
+func splitCell(s string, def Role) (Role, string) {
+	if !strings.HasPrefix(s, cellMark) {
+		return def, s
+	}
+	rest := s[len(cellMark):]
+	i := strings.Index(rest, cellMark)
+	if i < 0 {
+		return def, s
+	}
+	r, ok := RoleNamed(rest[:i])
+	if !ok {
+		return def, s
+	}
+	return r, rest[i+len(cellMark):]
+}
+
 // Render lays the table out for a terminal and returns finished lines.
 func (t Table) Render(term Term, th *Theme) []string {
 	if len(t.Cols) == 0 || len(t.Rows) == 0 {
@@ -61,7 +99,11 @@ func (t Table) Render(term Term, th *Theme) []string {
 	for _, row := range t.Rows {
 		for i := range t.Cols {
 			if i < len(row) {
-				if w := Width(row[i]); w > natural[i] {
+				// The tag is not content and is never drawn, so it is never
+				// measured either — budgeting it would reserve cells for an
+				// escape the reader cannot see.
+				_, v := splitCell(row[i], t.Cols[i].Role)
+				if w := Width(v); w > natural[i] {
 					natural[i] = w
 				}
 			}
@@ -85,17 +127,16 @@ func (t Table) Render(term Term, th *Theme) []string {
 	for n, row := range rows {
 		cells := make([]string, 0, len(t.Cols))
 		for i, c := range t.Cols {
-			v := ""
+			v, role := "", c.Role
 			if i < len(row) {
-				v = row[i]
+				role, v = splitCell(row[i], c.Role)
 			}
 			v = cut(v, widths[i], c.Cut, term.Ellipsis())
 			if i < len(t.Cols)-1 {
 				v = Pad(v, widths[i]) // never pad the last column: trailing
 			} //                        spaces are what wrap a row that just fit
-			role := c.Role
 			if t.Header && n == 0 {
-				role = Field
+				role = Field // a head is a head whatever its column paints
 			}
 			cells = append(cells, th.Paint(role, v))
 		}
@@ -197,7 +238,11 @@ func (t Table) stack(term Term, th *Theme) []string {
 			out = append(out, "")
 		}
 		for i, c := range t.Cols {
-			if i >= len(row) || row[i] == "" {
+			if i >= len(row) {
+				continue
+			}
+			role, val := splitCell(row[i], c.Role)
+			if val == "" {
 				continue
 			}
 			label := Truncate(c.Head+" ", avail, "")
@@ -206,8 +251,8 @@ func (t Table) stack(term Term, th *Theme) []string {
 				// No room for a value beside its label. Give the label its own
 				// line and let the value fold under it.
 				out = append(out, th.Paint(Field, label))
-				for _, l := range Fold(row[i], max(avail, 1)) {
-					out = append(out, th.Paint(c.Role, l))
+				for _, l := range Fold(val, max(avail, 1)) {
+					out = append(out, th.Paint(role, l))
 				}
 				continue
 			}
@@ -217,15 +262,15 @@ func (t Table) stack(term Term, th *Theme) []string {
 			// says more than three ragged ones.
 			if c.Cut == CutLeft {
 				out = append(out, th.Paint(Field, label)+
-					th.Paint(c.Role, TruncateLeft(row[i], budget, term.Ellipsis())))
+					th.Paint(role, TruncateLeft(val, budget, term.Ellipsis())))
 				continue
 			}
 			pad := strings.Repeat(" ", Width(label))
-			for j, l := range Fold(row[i], budget) {
+			for j, l := range Fold(val, budget) {
 				if j == 0 {
-					out = append(out, th.Paint(Field, label)+th.Paint(c.Role, l))
+					out = append(out, th.Paint(Field, label)+th.Paint(role, l))
 				} else {
-					out = append(out, pad+th.Paint(c.Role, l))
+					out = append(out, pad+th.Paint(role, l))
 				}
 			}
 		}

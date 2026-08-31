@@ -65,34 +65,53 @@ UI_SH=1
 # to a file while the terminal is still there gets a painter, which is right.
 UI_TTY=""; [ -t 2 ] && UI_TTY=1
 
+# And the OTHER stream, because a REPORT lands on it. `bench status`'s tables
+# and the `scruff` listing are the thing the user ran the command for rather
+# than the tool talking about it, so they draw on fd 1 — and a report is
+# measured, gated and painted for the stream it lands on, never the other one.
+# The two questions come apart in both directions: budget a report from stderr
+# and a TTY stdout beside a redirected stderr draws plain; gate it from stderr
+# and a piped stdout beside a live stderr draws escapes into the pipe.
+#
+# `ui_table_data` is the only thing here that asks this one. Everything else in
+# this file is the tool TALKING, and talking is fd 2.
+UI_OUT_TTY=""; [ -t 1 ] && UI_OUT_TTY=1
+
 # UI_PROFILE — none | 16 | 256 | truecolor
 #
 # The precedence is the one every well-behaved CLI agrees on and is easy to get
 # subtly wrong: NO_COLOR beats everything except CLICOLOR_FORCE, and a non-TTY
 # is colourless unless forced. https://no-color.org · https://bixense.com/clicolors
+#
+# ui__detect_profile [istty] [outvar] — both default to fd 2's answer, which is
+# what every verb in this file draws with. `ui_table_data` needs the identical
+# question asked about fd 1, and one function has to answer both or the two
+# gates drift: the environment half (NO_COLOR, CLICOLOR_FORCE, TERM=dumb) is
+# the same for every stream and only the terminal-ness differs.
 ui__detect_profile() {
-  local forced="" t
+  local forced="" t tty="${1-$UI_TTY}" out="${2:-UI_PROFILE}"
   case "${CLICOLOR_FORCE:-}" in '' | 0) ;; *) forced=1 ;; esac
-  if [ -n "${NO_COLOR+set}" ] && [ -z "$forced" ]; then UI_PROFILE=none; return 0; fi
-  if [ -z "$UI_TTY" ] && [ -z "$forced" ]; then UI_PROFILE=none; return 0; fi
+  if [ -n "${NO_COLOR+set}" ] && [ -z "$forced" ]; then printf -v "$out" '%s' none; return 0; fi
+  if [ -z "$tty" ] && [ -z "$forced" ]; then printf -v "$out" '%s' none; return 0; fi
   t="${TERM:-}"
   # "dumb" means it, and it means it under CLICOLOR_FORCE too: there is no
   # escape sequence a dumb terminal will not print at you literally.
-  if [ "$t" = dumb ]; then UI_PROFILE=none; return 0; fi
+  if [ "$t" = dumb ]; then printf -v "$out" '%s' none; return 0; fi
   case "${COLORTERM:-}" in
-    truecolor | 24bit | TRUECOLOR | 24BIT) UI_PROFILE=truecolor; return 0 ;;
+    truecolor | 24bit | TRUECOLOR | 24BIT) printf -v "$out" '%s' truecolor; return 0 ;;
   esac
   case "$t" in
-    *truecolor* | *direct*) UI_PROFILE=truecolor ;;
-    *256*) UI_PROFILE=256 ;;
+    *truecolor* | *direct*) printf -v "$out" '%s' truecolor ;;
+    *256*) printf -v "$out" '%s' 256 ;;
     # Forced, with nothing to go on — a CI log renderer, usually. 256 is the
     # safe middle: universally understood, and a small step from the hex.
-    '') UI_PROFILE=256 ;;
-    *) UI_PROFILE=16 ;;
+    '') printf -v "$out" '%s' 256 ;;
+    *) printf -v "$out" '%s' 16 ;;
   esac
   return 0
 }
 ui__detect_profile
+ui__detect_profile "$UI_OUT_TTY" UI_OUT_PROFILE
 
 # UI_VARIANT — which nebelung this machine is wearing. An explicit override,
 # then the file haus writes when it resolves haus.theme.flavor. Neither present
@@ -241,13 +260,28 @@ declare -gA UI__ANSI16=(
 # Every role resolved once, into UI_<ROLE>. Colour must live OUTSIDE a width —
 # an escape counted as width shears every column after it — so these are only
 # ever wrapped AROUND a pre-padded field, never inside a `%-*s`.
+#
+# The nine roles as one list, because four things have to agree about it: the
+# resolver below, `ui_cell`, `ui__cell_split`, and `palette.go`'s `roleNames`.
+UI__ROLE_LIST=' body accent ok warn err muted subject path field '
+ui__is_role() {
+  case "$UI__ROLE_LIST" in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+#
+# ui__resolve_palette [profile] [prefix] — both default to fd 2's, the stream
+# every verb here draws on. The second call below resolves the SAME variant at
+# fd 1's profile into `UI_OUT_*`, because a report is painted for the stream it
+# lands on: one palette, two gates.
 ui__resolve_palette() {
-  local role tok hex r g b sgr
-  UI_OFF=""; [ "$UI_PROFILE" != none ] && UI_OFF=$'\033[0m'
+  local role tok hex r g b sgr prof="${1:-$UI_PROFILE}" pfx="${2:-UI_}"
+  sgr=""; [ "$prof" != none ] && sgr=$'\033[0m'
+  printf -v "${pfx}OFF" '%s' "$sgr"
   for role in accent ok warn err muted subject path field; do
     sgr=""
     tok="${UI__TOKEN[$role]}"
-    case "$UI_PROFILE" in
+    case "$prof" in
       none) ;;
       16) sgr=$'\033['"${UI__ANSI16[$role]}"'m' ;;
       256) sgr=$'\033[38;5;'"${UI__X256[$UI_VARIANT:$tok]}"'m' ;;
@@ -257,27 +291,30 @@ ui__resolve_palette() {
         sgr=$'\033[38;2;'"$r;$g;${b}"'m'
         ;;
     esac
-    printf -v "UI_${role^^}" '%s' "$sgr"
+    printf -v "${pfx}${role^^}" '%s' "$sgr"
   done
   # `body` is ordinary text and stays the terminal's own colour, always. It is
   # part of the public nine even though it is always empty — a caller naming
   # `body` is saying "deliberately unpainted", which is worth being able to say.
-  # shellcheck disable=SC2034
-  UI_BODY=""
+  printf -v "${pfx}BODY" '%s' ""
   return 0
 }
 ui__resolve_palette
+ui__resolve_palette "$UI_OUT_PROFILE" UI_OUT_
 
-# ui_paint_role <var> <role> <text> — <text> wrapped in a role, into <var>.
+# ui_paint_role <var> <role> <text> [prefix] — <text> wrapped in a role, into
+# <var>. The prefix picks which stream's palette: `UI_` (fd 2, the default) or
+# `UI_OUT_` (fd 1, what a report is painted with).
 #
 # `printf -v` rather than `$( )` because a live region calls this ten times a
 # second per row: a command substitution there was thirty forks a second in a
 # loop whose own comment said everything in it was a builtin.
 ui_paint_role() {
-  local sgr="UI_${2^^}"
-  sgr="${!sgr:-}"
+  local pfx="${4:-UI_}" sgr off
+  sgr="${pfx}${2^^}"; sgr="${!sgr:-}"
+  off="${pfx}OFF";    off="${!off:-}"
   if [ -z "$sgr" ]; then printf -v "$1" '%s' "$3"
-  else printf -v "$1" '%s%s%s' "$sgr" "$3" "$UI_OFF"; fi
+  else printf -v "$1" '%s%s%s' "$sgr" "$3" "$off"; fi
   return 0
 }
 
@@ -390,7 +427,11 @@ UI_CAP=100        # past this a line of prose is unreadable, and a maximised
                   # terminal is not an invitation to fill it
 UI_NOFOLD=1048576 # the width of a stream with no window: wide enough that
                   # nothing is ever folded, finite so the arithmetic stays plain
-UI_COLS=80; UI_AVAIL=79; UI_PROSE=80; UI_RESIZED=0
+# UI_COLS is the WINDOW, whichever stream is looking at it — the raw
+# measurement the two per-stream answers are cut from, and not itself a budget.
+# `UI_PROSE` and `UI_AVAIL` are fd 2's, `UI_OUT_AVAIL` is fd 1's, and each of
+# those three is UI_NOFOLD when its OWN far end is not a terminal.
+UI_COLS=80; UI_AVAIL=79; UI_PROSE=80; UI_OUT_AVAIL=79; UI_RESIZED=0
 
 ui_measure() {
   local sz
@@ -399,8 +440,12 @@ ui_measure() {
   # answers a static 80 for a window it never measured, and assuming 80 for a
   # pipe is the identical mistake one layer up. A redirected stream has no width
   # to fit, and whatever is on the far end is usually grepping for whole lines.
-  if [ -z "$UI_TTY" ]; then
+  #
+  # Neither stream on a terminal means there is no window to ask about at all,
+  # and `stty` is not worth the fork.
+  if [ -z "$UI_TTY" ] && [ -z "$UI_OUT_TTY" ]; then
     UI_COLS="$UI_NOFOLD"; UI_AVAIL="$UI_NOFOLD"; UI_PROSE="$UI_NOFOLD"
+    UI_OUT_AVAIL="$UI_NOFOLD"
     return 0
   fi
   sz="$(stty size 2>/dev/null </dev/tty)" && UI_COLS="${sz#* }" \
@@ -418,6 +463,15 @@ ui_measure() {
   # they are bounded by their own content, and a job list stopping at 100 in a
   # 200-column window would be hiding the room it had.)
   UI_PROSE="$UI_COLS"; [ "$UI_PROSE" -gt "$UI_CAP" ] && UI_PROSE="$UI_CAP"
+  UI_OUT_AVAIL="$UI_AVAIL"
+  # One window, measured once; each stream then gets the answer for ITS OWN far
+  # end. `/dev/tty` is the controlling terminal, so the measurement above is
+  # valid whichever of the two is the terminal — but a redirected stream still
+  # has no width, and giving it the window's is the `tput cols` mistake wearing
+  # the other stream's clothes. `bench status > report.txt` on a live terminal
+  # writes the report whole; `bench status 2>/dev/null` still fits its table.
+  [ -z "$UI_TTY" ] && { UI_AVAIL="$UI_NOFOLD"; UI_PROSE="$UI_NOFOLD"; }
+  [ -z "$UI_OUT_TTY" ] && UI_OUT_AVAIL="$UI_NOFOLD"
   UI_RESIZED=1
   return 0
 }
@@ -437,15 +491,66 @@ UI_RESIZED=0
 # Text handed to these carries no escapes. Colour goes on afterwards, around a
 # finished field, for the same reason.
 
-# ui_truncate <var> <text> <width> — <text> cut to <width>, cut mark included.
+# ui_truncate <var> <text> <width> [tail] — <text> cut to <width>, cut mark
+# included. The tail defaults to the ellipsis; pass '' for a silent cut, which
+# is what a LABEL wants — a truncated column head has no room to also carry a
+# mark saying so.
 #
 # The mark is INSIDE the budget, so the result is never wider than asked: the
 # caller has already spent those cells on something else.
 ui_truncate() {
-  local s="$2" w="$3"
+  local s="$2" w="$3" tail="${4-$UI_ELLIPSIS}" keep
   if [ "$w" -le 0 ]; then printf -v "$1" '%s' ''; return 0; fi
   if [ "${#s}" -le "$w" ]; then printf -v "$1" '%s' "$s"; return 0; fi
-  printf -v "$1" '%s%s' "${s:0:$(( w - 1 ))}" "$UI_ELLIPSIS"
+  keep=$(( w - ${#tail} )); [ "$keep" -lt 0 ] && keep=0
+  printf -v "$1" '%s%s' "${s:0:$keep}" "$tail"
+  return 0
+}
+
+# ui_truncate_left <var> <text> <width> [head] — cut from the FRONT, which is
+# what a path wants: `…/internal/ui` keeps the part that identifies the file,
+# where cutting the other end leaves every path in a repo looking identical.
+#
+# It cuts at a separator when it can. `…/orkshop/haus` is worse than useless —
+# it reads as a directory that does not exist, and the eye stops on it.
+ui_truncate_left() {
+  local s="$2" w="$3" head="${4-$UI_ELLIPSIS}" hw len keep best sep i
+  if [ "$w" -le 0 ]; then printf -v "$1" '%s' ''; return 0; fi
+  len="${#s}"
+  if [ "$len" -le "$w" ]; then printf -v "$1" '%s' "$s"; return 0; fi
+  hw="${#head}"
+  if [ "$hw" -ge "$w" ]; then ui_truncate "$1" "$head" "$w" ''; return 0; fi
+  keep=$(( w - hw ))
+  # Width here is characters, so "the suffix from i still fits" is `len - i <=
+  # keep` and the leftmost cut that fits is arithmetic rather than a walk. The
+  # separator is INCLUDED (`…/haus`, not `…haus`), so the first one at or after
+  # that position is the longest separator-cut that fits — taking the one before
+  # it on trust returns a string one cell wider than asked for, which is the
+  # off-by-one this whole library exists to stop.
+  best=$(( len - keep )); sep=-1
+  for (( i = best; i < len; i++ )); do
+    if [ "${s:i:1}" = / ]; then sep="$i"; break; fi
+  done
+  # Prefer the separator whenever it keeps at least half of what the raw cut
+  # would; below that the boundary costs more than it earns.
+  if [ "$sep" -ge 0 ] && [ $(( (len - sep) * 2 )) -ge $(( len - best )) ]; then
+    printf -v "$1" '%s%s' "$head" "${s:sep}"
+  else
+    printf -v "$1" '%s%s' "$head" "${s:best}"
+  fi
+  return 0
+}
+
+# ui_pad <var> <text> <width> — <text> padded to <width> CHARACTERS.
+#
+# Not `printf '%-*s'`, which pads by BYTES: a cell holding `└` came up two
+# short under every UTF-8 locale, and every column after it sheared by a
+# different amount depending on which glyph was in front of it. `bench` carried
+# two hand-padded cells to work around exactly that.
+ui_pad() {
+  local d=$(( $3 - ${#2} ))
+  if [ "$d" -gt 0 ]; then printf -v "$1" '%s%*s' "$2" "$d" ''
+  else printf -v "$1" '%s' "$2"; fi
   return 0
 }
 
@@ -466,12 +571,22 @@ ui_fold() {
 }
 
 ui__fold_one() {
-  local w="$1" line="" word
+  local w="$1" line="" word reglob=""
   local -a words=()
   # Deliberate word splitting: folding happens AT whitespace, so the split is
-  # the algorithm and not an accident.
+  # the algorithm and not an accident. Pathname expansion is NOT, and an
+  # unquoted expansion does both: a line holding `*`, `?` or `[skip ci]` was
+  # replaced by whatever the working directory happened to contain — a commit
+  # subject, a branch name or a stacked table cell, splattered into a report
+  # `bench status` draws from wherever the user is standing.
+  #
+  # The caller's own setting is saved and put back rather than assumed: a script
+  # running under `set -f` must not come out of a folded line with globbing
+  # switched back on.
+  case $- in *f*) ;; *) reglob=1; set -f ;; esac
   # shellcheck disable=SC2206
   words=( $2 )
+  [ -n "$reglob" ] && set +f
   if [ "${#words[@]}" -eq 0 ]; then UI_FOLD+=(""); return 0; fi
   for word in "${words[@]}"; do
     # Longer than a whole line on its own — a store path, a URL. Take a full
@@ -770,5 +885,379 @@ ui__layout() { # ui__layout <array-var>
       __ui_out+=("   $painted$pname")
     fi
   done
+  return 0
+}
+
+# ── tables ───────────────────────────────────────────────────────────────────
+# A table whose columns are BUDGETED against the window rather than declared in
+# a format string. `%-38s` is a width the terminal never agreed to: printf pads,
+# so the row occupies its full declared width whatever the content, and the
+# threshold at which it wraps becomes a property of the format string and
+# nothing else. Seventy-two of those across three CLIs is the defect this
+# library was written for.
+#
+# This is snug's `Table` in bash, and `TestBashTableMatchesGo` diffs the two
+# over the same columns and rows at every width — a fallback that laid a table
+# out DIFFERENTLY from the binary would be worse than no fallback, because it
+# makes "which machine is this?" a question you have to ask about your own
+# output.
+#
+#   ui_col repo    6 1 subject right      # head, min, weight, role, cut side
+#   ui_col branch  8 3 body    right
+#   ui_col where  10 2 path    left
+#   ui_trow bench worktree-cli-beautify-snug ~/.cache/scruff/workshop/x
+#   ui_table_data 3 1                     # → fd 1, indented 3, with a header
+#
+# The cut side is per column and says what that column gives up first: `right`
+# keeps the front of a name, `left` the tail of a path (`…/internal/ui`), and
+# `never` belongs to a duration or a count — it is right or it is absent, never
+# abbreviated.
+#
+# Below the sum of the minimums the table stops being a table rather than
+# emitting a row it knows will wrap: `ui__table_stack` draws one label/value
+# pair per line, which has no alignment left to shear.
+declare -ga UI__TC_HEAD=() UI__TC_MIN=() UI__TC_WEIGHT=() UI__TC_ROLE=() UI__TC_CUT=()
+declare -ga UI__TROWS=()
+
+# ui_col <head> <min> <weight> <role> <cut> — declare one column's appetite.
+#
+# Min is the width below which the column stops being worth showing; weight
+# shares out whatever is left once every column has its minimum.
+#
+# Head doubles as the column's LABEL: it is what the stacked fallback prints
+# beside each value when the window is too narrow for any table at all. So give
+# every column a head even when the table draws no header row, which is the
+# family default — our tables are read by shape, and a header row on three rows
+# of data is furniture.
+ui_col() {
+  local min="${2:-1}" weight="${3:-1}"
+  # A width is arithmetic, and `$(( ))` re-evaluates its operand's VALUE as an
+  # expression: a min of `x` aborts a `set -u` caller with `x: unbound
+  # variable`, and one shaped like an array subscript runs a command
+  # substitution. Sanitised where the bad value arrives rather than at the three
+  # places downstream that would each have to remember — the same argument the
+  # width probe is written against, where a courtesy could kill its caller.
+  case "$min"    in '' | *[!0-9]*) min=1 ;; esac
+  case "$weight" in '' | *[!0-9]*) weight=1 ;; esac
+  UI__TC_HEAD+=("${1-}"); UI__TC_MIN+=("$min"); UI__TC_WEIGHT+=("$weight")
+  UI__TC_ROLE+=("${4:-body}"); UI__TC_CUT+=("${5:-right}")
+  return 0
+}
+
+# The ASCII unit separator brackets the role in a cell that overrides its
+# column's — a cell is TEXT here and there is no type to put a role in. Git
+# refuses a control character in a ref name and no path, count or duration the
+# family draws has ever held one; the split fires only on a leading mark, a role
+# this file knows, and a closing mark, so content that somehow contains one is
+# still drawn as itself.
+UI__CELL_MARK=$'\037'
+
+# ui_cell <var> <role> <text> — a cell that carries its own role.
+#
+# Most tables want a role per COLUMN and say so once in `ui_col`; that is what to
+# reach for. This is for the column whose meaning changes per ROW — a dirty count
+# that is amber only when it is not zero, a `↑` that stays quiet while a repo is
+# pushed — where the alternative is what `bench` did before it had one: build the
+# row with the escapes already in it, and discover the padding now counts them.
+ui_cell() {
+  # An unknown role would be drawn as its own tag AND measured with it,
+  # budgeting a dozen cells for something no terminal shows — the column shear
+  # this file exists to stop. An untagged cell keeps its column's role, which is
+  # the honest answer to a name that means nothing. (Go cannot reach this:
+  # `snug.Cell` takes a typed Role.)
+  ui__is_role "$2" || { printf -v "$1" '%s' "$3"; return 0; }
+  printf -v "$1" '%s%s%s%s' "$UI__CELL_MARK" "$2" "$UI__CELL_MARK" "$3"
+  return 0
+}
+
+# ui__cell_split <role-var> <text-var> <cell> <default-role>
+ui__cell_split() {
+  local c="$3" r t
+  case "$c" in "$UI__CELL_MARK"*"$UI__CELL_MARK"*) ;; *)
+    printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0 ;;
+  esac
+  t="${c#"$UI__CELL_MARK"}"
+  r="${t%%"$UI__CELL_MARK"*}"
+  ui__is_role "$r" || { printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0; }
+  printf -v "$1" '%s' "$r"
+  printf -v "$2" '%s' "${t#*"$UI__CELL_MARK"}"
+  return 0
+}
+
+# ui_trow <cell> [cell…] — buffer one row.
+#
+# A cell carries no escapes: colour goes on afterwards, around a finished field,
+# or it is counted as width and shears the column. A cell that needs a colour of
+# its own says so with `ui_cell`, which is a role and not an escape.
+ui_trow() {
+  local c
+  local -a cells=()
+  # A TAB is this file's own field separator and a NEWLINE is a row, so either
+  # one inside a cell silently reshapes the table rather than failing: a tab
+  # shifts every cell after it and drops the last, a newline draws a second,
+  # unaligned line. Neither is ever what a caller meant, and Go's `[][]string`
+  # cannot express them at all, so both become a space here.
+  for c in "$@"; do
+    c="${c//$'\t'/ }"
+    cells+=("${c//$'\n'/ }")
+  done
+  local IFS=$'\t'
+  UI__TROWS+=("${cells[*]-}")
+  return 0
+}
+
+ui_table_clear() {
+  UI__TC_HEAD=(); UI__TC_MIN=(); UI__TC_WEIGHT=(); UI__TC_ROLE=(); UI__TC_CUT=()
+  UI__TROWS=()
+  return 0
+}
+
+# ui__split <array-var> <line> — <line> split on TAB, EMPTY FIELDS KEPT.
+#
+# Not `IFS=$'\t' read -ra`: tab is IFS whitespace whatever IFS is set to, so
+# `read` collapses a run of them and every cell after an empty one shifts a
+# column left. The live region lives with that — its records never carry an
+# empty field between two full ones — but a table's do routinely (a `dirty`
+# column is empty on a clean repo), so it cannot.
+ui__split() {
+  local -n __ui_sp="$1"
+  local s="$2"$'\t' f
+  __ui_sp=()
+  while [ -n "$s" ]; do
+    f="${s%%$'\t'*}"
+    __ui_sp+=("$f")
+    s="${s#*$'\t'}"
+  done
+  return 0
+}
+
+# ui__join_heads <var> — the column heads as one TAB-joined row.
+#
+# `local IFS` and not a save/restore pair: a caller that has `unset IFS` makes
+# the restore either abort under `set -u` or put back an EMPTY IFS, which turns
+# word splitting off for the rest of that caller's run. `local` hands the
+# caller's own value back whatever it was, including unset.
+ui__join_heads() {
+  local IFS=$'\t'
+  printf -v "$1" '%s' "${UI__TC_HEAD[*]}"
+  return 0
+}
+
+# ui__table_budget <widths-var> <natural-var> <avail> — hand out <avail> cells.
+# Returns 1 when even the minimums do not fit, which is the caller's signal to
+# stop drawing a table at all.
+ui__table_budget() {
+  local -n __ui_tw="$1" __ui_tnat="$2"
+  local avail="$3" i n sum=0 floor=0 m surplus total weight give moved
+  for n in "${__ui_tnat[@]}"; do sum=$(( sum + n )); done
+  if [ "$sum" -le "$avail" ]; then __ui_tw=( "${__ui_tnat[@]}" ); return 0; fi
+
+  __ui_tw=()
+  for i in "${!__ui_tnat[@]}"; do
+    m="${UI__TC_MIN[$i]}"
+    # Never reserve more than the column will ever use.
+    [ "$m" -gt "${__ui_tnat[$i]}" ] && m="${__ui_tnat[$i]}"
+    # A duration is never abbreviated; it is dropped whole. Reserving its
+    # natural width is what makes "dropped" the only other outcome.
+    [ "${UI__TC_CUT[$i]}" = never ] && m="${__ui_tnat[$i]}"
+    __ui_tw+=("$m"); floor=$(( floor + m ))
+  done
+  [ "$floor" -gt "$avail" ] && return 1
+
+  # Share the surplus by weight, but never past what a column can use. Repeat
+  # until nothing moves: a column hitting its natural width releases its share
+  # back to the others, which is the difference between one wide column hogging
+  # the window and every column being readable.
+  surplus=$(( avail - floor ))
+  while [ "$surplus" -gt 0 ]; do
+    total=0
+    for i in "${!__ui_tw[@]}"; do
+      [ "${__ui_tw[$i]}" -ge "${__ui_tnat[$i]}" ] && continue
+      weight="${UI__TC_WEIGHT[$i]}"; [ "$weight" -lt 1 ] && weight=1
+      total=$(( total + weight ))
+    done
+    if [ "$total" -eq 0 ]; then break; fi
+    moved=0
+    for i in "${!__ui_tw[@]}"; do
+      [ "${__ui_tw[$i]}" -ge "${__ui_tnat[$i]}" ] && continue
+      weight="${UI__TC_WEIGHT[$i]}"; [ "$weight" -lt 1 ] && weight=1
+      give=$(( surplus * weight / total )); [ "$give" -lt 1 ] && give=1
+      [ $(( __ui_tw[i] + give )) -gt "${__ui_tnat[$i]}" ] && give=$(( __ui_tnat[i] - __ui_tw[i] ))
+      [ "$give" -gt $(( surplus - moved )) ] && give=$(( surplus - moved ))
+      __ui_tw[i]=$(( __ui_tw[i] + give )); moved=$(( moved + give ))
+      if [ "$moved" -eq "$surplus" ]; then break; fi
+    done
+    if [ "$moved" -eq 0 ]; then break; fi
+    surplus=$(( surplus - moved ))
+  done
+  return 0
+}
+
+# ui__table_cut <var> <text> <width> <side> — one cell, cut the way its column
+# said it gives up cells.
+ui__table_cut() {
+  case "$4" in
+    left)  ui_truncate_left "$1" "$2" "$3" ;;
+    never)
+      # It is right or it is absent. A duration cut to `12m…` is a lie with a
+      # mark on it.
+      if [ "${#2}" -gt "$3" ]; then printf -v "$1" '%s' ''
+      else printf -v "$1" '%s' "$2"; fi
+      ;;
+    *)     ui_truncate "$1" "$2" "$3" ;;
+  esac
+  return 0
+}
+
+# ui__table_stack <out-array> <avail> <prefix> — the fallback below the sum of
+# the minimums: one label/value pair per line.
+#
+# Bound by the same rule as everything else — nothing wider than the window —
+# which is why the LABEL is truncated too. A fallback that overflows is not a
+# fallback.
+ui__table_stack() {
+  local -n __ui_st="$1"
+  local avail="$2" pfx="$3"
+  local -a cells=()
+  local n i j w v role label lbl painted pad
+  __ui_st=()
+  for n in "${!UI__TROWS[@]}"; do
+    [ "$n" -gt 0 ] && __ui_st+=("")
+    ui__split cells "${UI__TROWS[$n]}"
+    for i in "${!UI__TC_HEAD[@]}"; do
+      [ "$i" -lt "${#cells[@]}" ] || continue
+      ui__cell_split role v "${cells[$i]}" "${UI__TC_ROLE[$i]}"
+      [ -n "$v" ] || continue
+      ui_truncate label "${UI__TC_HEAD[$i]} " "$avail" ''
+      ui_paint_role lbl field "$label" "$pfx"
+      if [ $(( avail - ${#label} )) -lt 1 ]; then
+        # No room for a value beside its label. Give the label its own line and
+        # let the value fold under it.
+        __ui_st+=("$lbl")
+        w="$avail"; [ "$w" -lt 1 ] && w=1
+        ui_fold "$w" "$v"
+        for j in "${!UI_FOLD[@]}"; do
+          ui_paint_role painted "$role" "${UI_FOLD[$j]}" "$pfx"
+          __ui_st+=("$painted")
+        done
+        continue
+      fi
+      # A column that declared which END matters keeps that promise here too:
+      # folding a path breaks it mid-component (`…nebelun` / `g/…`), which reads
+      # as a directory that does not exist. One left-cut line says more than
+      # three ragged ones.
+      if [ "${UI__TC_CUT[$i]}" = left ]; then
+        ui_truncate_left v "$v" $(( avail - ${#label} ))
+        ui_paint_role painted "$role" "$v" "$pfx"
+        __ui_st+=("$lbl$painted")
+        continue
+      fi
+      printf -v pad '%*s' "${#label}" ''
+      ui_fold $(( avail - ${#label} )) "$v"
+      for j in "${!UI_FOLD[@]}"; do
+        ui_paint_role painted "$role" "${UI_FOLD[$j]}" "$pfx"
+        if [ "$j" -eq 0 ]; then __ui_st+=("$lbl$painted")
+        else __ui_st+=("$pad$painted"); fi
+      done
+    done
+  done
+  return 0
+}
+
+# ui__table_render <out-array> <avail> <prefix> <indent> <header> — the finished
+# lines. Everything above is arithmetic; this is the only part that paints.
+ui__table_render() {
+  local -n __ui_lines="$1"
+  local avail="$2" pfx="$3" indent="$4" header="$5"
+  local -a natural=() widths=() cells=() all=()
+  local i n cols row v role line pad head_row
+  __ui_lines=()
+  cols="${#UI__TC_HEAD[@]}"
+  if [ "$cols" -eq 0 ] || [ "${#UI__TROWS[@]}" -eq 0 ]; then return 0; fi
+
+  # The natural width is measured from the content AND the head, never assumed.
+  # Budgeting seven cells because "12m 34s" is the longest duration is how
+  # "100m 05s" — eight — ended up in the next column.
+  for (( i = 0; i < cols; i++ )); do natural+=("${#UI__TC_HEAD[$i]}"); done
+  for row in "${UI__TROWS[@]}"; do
+    ui__split cells "$row"
+    for (( i = 0; i < cols; i++ )); do
+      [ "$i" -lt "${#cells[@]}" ] || continue
+      # The tag is not content and is never drawn, so it is never measured
+      # either: budgeting it reserves cells for something nobody can see.
+      ui__cell_split role v "${cells[$i]}" body
+      [ "${#v}" -gt "${natural[$i]}" ] && natural[i]="${#v}"
+    done
+  done
+
+  # One space between columns; two reads as a gutter rather than a gap.
+  if ! ui__table_budget widths natural $(( avail - indent - (cols - 1) )); then
+    ui__table_stack __ui_lines "$avail" "$pfx"
+    return 0
+  fi
+
+  if [ "$header" = 1 ]; then ui__join_heads head_row; all+=("$head_row"); fi
+  all+=("${UI__TROWS[@]}")
+  printf -v pad '%*s' "$indent" ''
+  for n in "${!all[@]}"; do
+    ui__split cells "${all[$n]}"
+    line="$pad"
+    for (( i = 0; i < cols; i++ )); do
+      v=""; role="${UI__TC_ROLE[$i]}"
+      [ "$i" -lt "${#cells[@]}" ] && ui__cell_split role v "${cells[$i]}" "$role"
+      ui__table_cut v "$v" "${widths[$i]}" "${UI__TC_CUT[$i]}"
+      # Never pad the last column: trailing spaces are what wrap a row that
+      # just fit.
+      [ "$i" -lt $(( cols - 1 )) ] && ui_pad v "$v" "${widths[$i]}"
+      # A head is a head whatever its column paints.
+      if [ "$header" = 1 ] && [ "$n" -eq 0 ]; then role=field; fi
+      # Colour OUTSIDE the width: an escape counted as width shears the column.
+      ui_paint_role v "$role" "$v" "$pfx"
+      if [ "$i" -eq 0 ]; then line+="$v"; else line+=" $v"; fi
+    done
+    __ui_lines+=("${line%"${line##*[! ]}"}")
+  done
+  return 0
+}
+
+# ui_table [indent] [header] — the table on STDERR, part of what the tool is
+# SAYING, beside ui_say and ui_warn.
+#
+# ⚠️ Close any live region first, exactly as `ui_table_data` must. Go's `Print`
+# cooperates with an open region — `writeLines` rewinds it, prints, and repaints
+# — and this cannot: it is a bare write to fd 2 with no bookkeeping, so the
+# region's next repaint walks up the lines IT counted and erases the table on
+# the way. Drawing above a live region is the one thing a shell painter cannot
+# do at all, which is what `snug run` is for.
+ui_table() {
+  local -a __ui_t=()
+  local l
+  ui__table_render __ui_t "$UI_AVAIL" UI_ "${1:-$UI_GUTTER}" "${2:-0}"
+  for l in ${__ui_t[@]+"${__ui_t[@]}"}; do printf '%s\n' "$l" >&2; done
+  ui_table_clear
+  return 0
+}
+
+# ui_table_data [indent] [header] — the table on STDOUT, because it is the
+# REPORT: the thing the user ran the command for rather than the tool talking
+# about it. `bench status | less` carries it whole, and the narration around it
+# stays on fd 2.
+#
+# Measured, gated and painted for fd 1 — which is the whole reason `UI_OUT_*`
+# exists. Asking fd 2 about a report costs it in both directions: a TTY stdout
+# beside a redirected stderr would draw plain, and a piped stdout beside a live
+# stderr would draw escapes into the pipe.
+#
+# ⚠️ Close any live region first. Like `ui_data`, this does not cooperate with
+# one, and when both streams are the same terminal it is destructive rather than
+# merely uncooperative: the region's next repaint walks up the lines IT wrote
+# and clears downward from a cursor this has since moved, erasing the report the
+# user actually ran the command for.
+ui_table_data() {
+  local -a __ui_t=()
+  local l
+  ui__table_render __ui_t "$UI_OUT_AVAIL" UI_OUT_ "${1:-$UI_GUTTER}" "${2:-0}"
+  for l in ${__ui_t[@]+"${__ui_t[@]}"}; do printf '%s\n' "$l"; done
+  ui_table_clear
   return 0
 }
