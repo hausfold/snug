@@ -596,3 +596,118 @@ EOS
   [[ "$output" == *DIRTY-IS-WARN* ]] || { echo "got: $output"; false; }
   [[ "$output" == *CLEAN-IS-MUTED* ]] || { echo "got: $output"; false; }
 }
+
+# ── what a cell must never be allowed to do ──────────────────────────────────
+# Everything below is a way for CONTENT to reach out of its column. Go cannot
+# express most of them — a `[][]string` cell is a string and `strings.Fields`
+# does not glob — so `TestBashTableMatchesGo` is blind to every one, and these
+# are the whole guard.
+
+@test "a cell holding a glob is drawn, not expanded against the directory" {
+  # Measured, in the stacked tier: a cell of `fix * now` was replaced by the
+  # working directory's listing, because `words=( $2 )` word-splits AND
+  # pathname-expands. `bench status` draws from wherever the user is standing,
+  # and a branch name or a commit subject holding `*`, `?` or `[skip ci]` is
+  # ordinary. It reached `ui_say` the same way, which is the older half of this.
+  cd "$BATS_TEST_TMPDIR"
+  touch aaa.txt bbb.txt
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=12; UI_AVAIL=11; UI_OUT_AVAIL=11; UI_PROSE=11
+    ui_col subject 6 1 body  right
+    ui_col detail  6 1 muted right
+    ui_trow "fix * now" "second value here"
+    ui_table_data 0 0
+    ui_say "released * today" 2>&1'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *aaa.txt* && "$output" != *bbb.txt* ]] \
+    || { echo "a cell was glob-expanded: $output"; false; }
+  [[ "$output" == *'*'* ]] || { echo "the star itself was lost: $output"; false; }
+}
+
+@test "folding gives the caller its own globbing setting back" {
+  # The fix for the above must not be a shell-wide `set -f` that outlives the
+  # line it was protecting.
+  ui_sh '
+    UI_TTY=1; UI_PROFILE=none; ui__resolve_palette; UI_PROSE=40
+    ui_say "a line" 2>/dev/null
+    case $- in *f*) echo GLOBBING-OFF ;; *) echo GLOBBING-ON ;; esac
+    set -f
+    ui_say "another" 2>/dev/null
+    case $- in *f*) echo STILL-OFF ;; *) echo TURNED-BACK-ON ;; esac'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" == *GLOBBING-ON* ]] || { echo "got: $output"; false; }
+  [[ "$output" == *STILL-OFF* ]] || { echo "got: $output"; false; }
+}
+
+@test "a tab or a newline in a cell cannot reshape the table" {
+  # A tab is this file's field separator and a newline is a row: unhandled, the
+  # first shifts every cell after it and drops the last, and the second draws a
+  # second unaligned line. Both become a space.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=60; UI_AVAIL=59; UI_OUT_AVAIL=59
+    ui_col a 4 1 body right
+    ui_col b 4 1 body right
+    ui_trow "x'$'\t''y" z
+    ui_trow "p'$'\n''q" r
+    ui_table_data 0 0'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "${#lines[@]}" -eq 2 ] || { echo "a newline drew a second row: $output"; false; }
+  [[ "${lines[0]}" == *z* ]] || { echo "a tab dropped the last cell: ${lines[0]}"; false; }
+  [[ "${lines[1]}" == *r* ]] || { echo "a newline dropped the last cell: ${lines[1]}"; false; }
+}
+
+@test "a column width that is not a number cannot kill or hijack the caller" {
+  # `$(( ))` re-evaluates its operand's VALUE as an expression. A min of `x`
+  # aborted a `set -u` caller before it drew anything, and an array-subscript
+  # form ran a command substitution — a width probe killing the caller it was
+  # being polite to is the failure this library was written against.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=20; UI_AVAIL=19; UI_OUT_AVAIL=19
+    ui_col a "x[\$(echo PWNED >&2)]" 1 body right
+    ui_col b -3 zz body right
+    ui_trow one two
+    ui_table_data 0 0
+    echo SURVIVED'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *PWNED* ]] || { echo "a column width ran a command: $output"; false; }
+  [[ "$output" == *SURVIVED* ]] || { echo "a column width killed the caller: $output"; false; }
+}
+
+@test "a role ui_cell has never heard of is not drawn and not measured" {
+  # An unknown role would otherwise be emitted as its own raw tag AND budgeted
+  # for, which is a column ~12 cells wider than anything the terminal shows.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col a 4 1 body right
+    ui_cell c bogusrole hello
+    ui_trow "$c"
+    ui_table_data 0 0 | cat -v'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$output" = hello ] || { echo "got: [$output]"; false; }
+}
+
+@test "a caller that unset IFS gets it back unset" {
+  # `ifs=$IFS; …; IFS=$ifs` either aborts under `set -u` or restores an EMPTY
+  # IFS, which turns word splitting off for the rest of that caller run.
+  ui_sh '
+    unset IFS
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col a 4 1 body right; ui_col b 4 1 body right
+    ui_trow one two
+    ui_table_data 0 1 >/dev/null
+    [ -n "${IFS+set}" ] && { echo IFS-RESURRECTED; exit 0; }
+    set -- $(printf "x y z"); echo "SPLIT=$#"'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *IFS-RESURRECTED* ]] || { echo "IFS came back set: $output"; false; }
+  [[ "$output" == *SPLIT=3* ]] || { echo "word splitting was broken: $output"; false; }
+}

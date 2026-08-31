@@ -261,6 +261,15 @@ declare -gA UI__ANSI16=(
 # an escape counted as width shears every column after it — so these are only
 # ever wrapped AROUND a pre-padded field, never inside a `%-*s`.
 #
+# The nine roles as one list, because four things have to agree about it: the
+# resolver below, `ui_cell`, `ui__cell_split`, and `palette.go`'s `roleNames`.
+UI__ROLE_LIST=' body accent ok warn err muted subject path field '
+ui__is_role() {
+  case "$UI__ROLE_LIST" in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+#
 # ui__resolve_palette [profile] [prefix] — both default to fd 2's, the stream
 # every verb here draws on. The second call below resolves the SAME variant at
 # fd 1's profile into `UI_OUT_*`, because a report is painted for the stream it
@@ -418,6 +427,10 @@ UI_CAP=100        # past this a line of prose is unreadable, and a maximised
                   # terminal is not an invitation to fill it
 UI_NOFOLD=1048576 # the width of a stream with no window: wide enough that
                   # nothing is ever folded, finite so the arithmetic stays plain
+# UI_COLS is the WINDOW, whichever stream is looking at it — the raw
+# measurement the two per-stream answers are cut from, and not itself a budget.
+# `UI_PROSE` and `UI_AVAIL` are fd 2's, `UI_OUT_AVAIL` is fd 1's, and each of
+# those three is UI_NOFOLD when its OWN far end is not a terminal.
 UI_COLS=80; UI_AVAIL=79; UI_PROSE=80; UI_OUT_AVAIL=79; UI_RESIZED=0
 
 ui_measure() {
@@ -558,12 +571,22 @@ ui_fold() {
 }
 
 ui__fold_one() {
-  local w="$1" line="" word
+  local w="$1" line="" word reglob=""
   local -a words=()
   # Deliberate word splitting: folding happens AT whitespace, so the split is
-  # the algorithm and not an accident.
+  # the algorithm and not an accident. Pathname expansion is NOT, and an
+  # unquoted expansion does both: a line holding `*`, `?` or `[skip ci]` was
+  # replaced by whatever the working directory happened to contain — a commit
+  # subject, a branch name or a stacked table cell, splattered into a report
+  # `bench status` draws from wherever the user is standing.
+  #
+  # The caller's own setting is saved and put back rather than assumed: a script
+  # running under `set -f` must not come out of a folded line with globbing
+  # switched back on.
+  case $- in *f*) ;; *) reglob=1; set -f ;; esac
   # shellcheck disable=SC2206
   words=( $2 )
+  [ -n "$reglob" ] && set +f
   if [ "${#words[@]}" -eq 0 ]; then UI_FOLD+=(""); return 0; fi
   for word in "${words[@]}"; do
     # Longer than a whole line on its own — a store path, a URL. Take a full
@@ -907,7 +930,16 @@ declare -ga UI__TROWS=()
 # family default — our tables are read by shape, and a header row on three rows
 # of data is furniture.
 ui_col() {
-  UI__TC_HEAD+=("$1"); UI__TC_MIN+=("${2:-1}"); UI__TC_WEIGHT+=("${3:-1}")
+  local min="${2:-1}" weight="${3:-1}"
+  # A width is arithmetic, and `$(( ))` re-evaluates its operand's VALUE as an
+  # expression: a min of `x` aborts a `set -u` caller with `x: unbound
+  # variable`, and one shaped like an array subscript runs a command
+  # substitution. Sanitised where the bad value arrives rather than at the three
+  # places downstream that would each have to remember — the same argument the
+  # width probe is written against, where a courtesy could kill its caller.
+  case "$min"    in '' | *[!0-9]*) min=1 ;; esac
+  case "$weight" in '' | *[!0-9]*) weight=1 ;; esac
+  UI__TC_HEAD+=("${1-}"); UI__TC_MIN+=("$min"); UI__TC_WEIGHT+=("$weight")
   UI__TC_ROLE+=("${4:-body}"); UI__TC_CUT+=("${5:-right}")
   return 0
 }
@@ -928,6 +960,12 @@ UI__CELL_MARK=$'\037'
 # pushed — where the alternative is what `bench` did before it had one: build the
 # row with the escapes already in it, and discover the padding now counts them.
 ui_cell() {
+  # An unknown role would be drawn as its own tag AND measured with it,
+  # budgeting a dozen cells for something no terminal shows — the column shear
+  # this file exists to stop. An untagged cell keeps its column's role, which is
+  # the honest answer to a name that means nothing. (Go cannot reach this:
+  # `snug.Cell` takes a typed Role.)
+  ui__is_role "$2" || { printf -v "$1" '%s' "$3"; return 0; }
   printf -v "$1" '%s%s%s%s' "$UI__CELL_MARK" "$2" "$UI__CELL_MARK" "$3"
   return 0
 }
@@ -940,10 +978,7 @@ ui__cell_split() {
   esac
   t="${c#"$UI__CELL_MARK"}"
   r="${t%%"$UI__CELL_MARK"*}"
-  case "$r" in
-    body | accent | ok | warn | err | muted | subject | path | field) ;;
-    *) printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0 ;;
-  esac
+  ui__is_role "$r" || { printf -v "$1" '%s' "$4"; printf -v "$2" '%s' "$c"; return 0; }
   printf -v "$1" '%s' "$r"
   printf -v "$2" '%s' "${t#*"$UI__CELL_MARK"}"
   return 0
@@ -955,8 +990,19 @@ ui__cell_split() {
 # or it is counted as width and shears the column. A cell that needs a colour of
 # its own says so with `ui_cell`, which is a role and not an escape.
 ui_trow() {
+  local c
+  local -a cells=()
+  # A TAB is this file's own field separator and a NEWLINE is a row, so either
+  # one inside a cell silently reshapes the table rather than failing: a tab
+  # shifts every cell after it and drops the last, a newline draws a second,
+  # unaligned line. Neither is ever what a caller meant, and Go's `[][]string`
+  # cannot express them at all, so both become a space here.
+  for c in "$@"; do
+    c="${c//$'\t'/ }"
+    cells+=("${c//$'\n'/ }")
+  done
   local IFS=$'\t'
-  UI__TROWS+=("$*")
+  UI__TROWS+=("${cells[*]-}")
   return 0
 }
 
@@ -982,6 +1028,18 @@ ui__split() {
     __ui_sp+=("$f")
     s="${s#*$'\t'}"
   done
+  return 0
+}
+
+# ui__join_heads <var> — the column heads as one TAB-joined row.
+#
+# `local IFS` and not a save/restore pair: a caller that has `unset IFS` makes
+# the restore either abort under `set -u` or put back an EMPTY IFS, which turns
+# word splitting off for the rest of that caller's run. `local` hands the
+# caller's own value back whatever it was, including unset.
+ui__join_heads() {
+  local IFS=$'\t'
+  printf -v "$1" '%s' "${UI__TC_HEAD[*]}"
   return 0
 }
 
@@ -1112,7 +1170,7 @@ ui__table_render() {
   local -n __ui_lines="$1"
   local avail="$2" pfx="$3" indent="$4" header="$5"
   local -a natural=() widths=() cells=() all=()
-  local i n cols row v role line pad ifs
+  local i n cols row v role line pad head_row
   __ui_lines=()
   cols="${#UI__TC_HEAD[@]}"
   if [ "$cols" -eq 0 ] || [ "${#UI__TROWS[@]}" -eq 0 ]; then return 0; fi
@@ -1138,9 +1196,7 @@ ui__table_render() {
     return 0
   fi
 
-  if [ "$header" = 1 ]; then
-    ifs="$IFS"; IFS=$'\t'; all+=("${UI__TC_HEAD[*]}"); IFS="$ifs"
-  fi
+  if [ "$header" = 1 ]; then ui__join_heads head_row; all+=("$head_row"); fi
   all+=("${UI__TROWS[@]}")
   printf -v pad '%*s' "$indent" ''
   for n in "${!all[@]}"; do
@@ -1165,7 +1221,14 @@ ui__table_render() {
 }
 
 # ui_table [indent] [header] — the table on STDERR, part of what the tool is
-# SAYING. It scrolls above an open live region like any other line.
+# SAYING, beside ui_say and ui_warn.
+#
+# ⚠️ Close any live region first, exactly as `ui_table_data` must. Go's `Print`
+# cooperates with an open region — `writeLines` rewinds it, prints, and repaints
+# — and this cannot: it is a bare write to fd 2 with no bookkeeping, so the
+# region's next repaint walks up the lines IT counted and erases the table on
+# the way. Drawing above a live region is the one thing a shell painter cannot
+# do at all, which is what `snug run` is for.
 ui_table() {
   local -a __ui_t=()
   local l

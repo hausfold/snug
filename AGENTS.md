@@ -44,8 +44,13 @@ Every defect this library was written for is a violation of that rule:
 - `printf '%-9s'` pads by **bytes**. Every column after a multi-byte glyph was
   sheared by a different amount depending on which glyph it was.
 
-`TestRegionNeverReachesTheLastColumn` and `TestTableNeverReachesTheLastColumn`
-sweep widths 2–200 and are the tests to run first when anything here changes.
+`TestRegionNeverReachesTheLastColumn`, `TestTableNeverReachesTheLastColumn`,
+`TestBashTableNeverReachesTheLastColumn` and bats's *"a table never reaches the
+last column"* sweep widths 2–200 and are the tests to run first when anything
+here changes. `TestBashTableMatchesGo` is the other one that matters most: it
+diffs the two painters line for line at every width, at `none` **and** at `256`
+— the second because a role with the colour off leaves no trace, so layout is
+all the first can compare.
 The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
 
 ## Traps, each of which cost a debugging session
@@ -166,10 +171,14 @@ copy of the arithmetic — written out again rather than imported, because a tes
 that asks the generator to check its own maths checks nothing.
 
 Adding a role means a row in `roleToken`, a row in `role16`, a row in
-`share/ui.sh`'s `UI__TOKEN` **and** `UI__ANSI16`, a row in the `TOKENS` list in
-`script/gen-palette.py`, and a regeneration. Five places on purpose: a role
-without a 16-colour answer is a role that vanishes on somebody's terminal, and a
-role the fallback has never heard of vanishes on somebody's *machine*.
+`roleNames`, a row in `share/ui.sh`'s `UI__TOKEN` **and** `UI__ANSI16`, a word in
+its `UI__ROLE_LIST`, a row in the `TOKENS` list in `script/gen-palette.py`, and
+a regeneration. Seven places on purpose, and each omission has its own silent
+failure: a role with no 16-colour answer vanishes on somebody's terminal, one
+the fallback has never heard of vanishes on somebody's *machine*, one missing
+from `roleNames` makes `Role.String()` answer `body` so every `snug.Cell` with
+it draws unpainted, and one missing from `UI__ROLE_LIST` makes `ui_cell` emit
+its raw `\037` tag into the terminal **and** measure it, shearing the column.
 
 ## Working here
 

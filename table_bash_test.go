@@ -131,7 +131,14 @@ done
 	cmd := exec.Command(sh, "-c", script)
 	// LC_ALL=C with SNUG_ASCII=1 so one byte is one character is one cell on the
 	// bash side, which is what makes `${#s}` a cell count there.
-	cmd.Env = append(os.Environ(), "SNUG_ASCII=1", "LC_ALL=C")
+	//
+	// SNUG_VARIANT is PINNED rather than unset: the Go side constructs a Term
+	// with a zero Variant (Nebelung), while ui.sh resolves the environment and
+	// then `~/.config/snug/variant`. Left alone, a developer wearing latte gets
+	// every painted subtest red — `\x1b[38;5;145m` against `\x1b[38;5;242m` —
+	// about a layout test. Pinning neutralises the file too, which unsetting
+	// would not.
+	cmd.Env = append(os.Environ(), "SNUG_ASCII=1", "LC_ALL=C", "SNUG_VARIANT=nebelung")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("ui.sh: %v\n%s", err, out)
