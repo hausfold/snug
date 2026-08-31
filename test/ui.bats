@@ -427,3 +427,137 @@ PYEOF
   # And the cursor came back on, which is the worst thing to leave behind.
   [[ "$output" == *$'\033[?25h'* ]] || { echo "the cursor was never restored: $(printf %q "$output")"; false; }
 }
+
+# ── tables ───────────────────────────────────────────────────────────────────
+# The Go suite diffs this painter against `Table.Render` line for line at every
+# width (`TestBashTableMatchesGo`). These are the parts that diff cannot reach:
+# the bound itself, in the job that has no Go, and the three things bash gets
+# wrong on its own — a collapsed empty field, a byte-padded cell, and a report
+# gated by the wrong stream.
+
+@test "a table never reaches the last column, at any width, in any tier" {
+  # The same rule the live region is held to, and the same sweep. Both tiers are
+  # in this range: budgeted columns at the top, and the stacked fallback at the
+  # bottom where not even the minimums fit.
+  ui_sh "$SWEEP_PRELUDE"'
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    for w in $(seq 2 200); do
+      UI_COLS=$w; UI_AVAIL=$(( w - 1 )); UI_OUT_AVAIL=$(( w - 1 ))
+      ui_table_clear
+      ui_col repo  6 1 subject right
+      ui_col state 5 1 ok      right
+      ui_col path 10 4 path    left
+      ui_col age   3 1 muted   never
+      ui_trow haus current /Users/you/code/workshop/haus/modules/core/haus.sh 2h
+      ui_trow scruff stale /Users/you/code/workshop/scruff/internal/ui/ui.go 3d
+      ui_trow nebelung current /Users/you/code/workshop/nebelung/palette.json 11m
+      while IFS= read -r l; do
+        n="$(bare "$l")"
+        [ "${#n}" -le $(( w - 1 )) ] || { echo "w=$w [${#n}] $n"; exit 1; }
+      done < <(ui_table_data 3 1)
+    done
+    echo SWEPT'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" == *SWEPT* ]] || { echo "got: $output"; false; }
+}
+
+@test "an empty cell does not shift the row a column left" {
+  # `IFS=$'\t' read -ra` collapses a RUN of tabs, because tab is IFS whitespace
+  # whatever IFS is set to. The live region lives with that — its records never
+  # carry an empty field between two full ones — but a `dirty` column is empty
+  # on a clean repo, so a table cannot.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col repo  4 1 subject right
+    ui_col dirty 5 1 muted   right
+    ui_col where 5 1 path    right
+    ui_trow haus  ""    here
+    ui_trow bench dirty there
+    ui_table_data 0 0'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "${lines[0]}" = 'haus        here' ] || { echo "got: [${lines[0]}]"; false; }
+  [ "${lines[1]}" = 'bench dirty there' ] || { echo "got: [${lines[1]}]"; false; }
+}
+
+@test "a multi-byte cell is padded by cells, not by bytes" {
+  # `printf '%-*s'` pads by BYTES: `└` is three of them and one column, so every
+  # column after it sheared by two — and by a different two depending on which
+  # glyph was in front of it. `bench` carries two hand-padded cells written
+  # around exactly this; ui_pad is what deletes them.
+  run env LC_ALL=en_US.UTF-8 "$BASH" -c "
+    set -euo pipefail; source '$UI'
+    UI_TTY=1; UI_OUT_TTY=1; UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col branch 6 1 body right
+    ui_col where  4 1 path right
+    ui_trow '└ lane' x
+    ui_trow 'worktree-x' y
+    ui_table_data 0 0"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  # Both values start in the same column, which is the whole claim.
+  [ "${lines[0]}" = '└ lane     x' ] || { echo "got: [${lines[0]}]"; false; }
+  [ "${lines[1]}" = 'worktree-x y' ] || { echo "got: [${lines[1]}]"; false; }
+}
+
+@test "a report is gated by the stream it lands on, not by the other one" {
+  # The one edge `bench`'s two hand-rolled gates could not close, and it wrote
+  # the loss down in its own comment: a piped stdout beside a live stderr drew
+  # escapes into the pipe, and a TTY stdout beside a redirected stderr drew
+  # plain. One palette, two gates, each asked about its own far end.
+
+  # Live stderr, redirected stdout: the report stays clean.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=""
+    UI_PROFILE=truecolor; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col repo 4 1 subject right; ui_trow bench
+    ui_table_data 3 0 | cat -v'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" != *'^['* ]] || { echo "escapes reached a redirected report: $output"; false; }
+
+  # Redirected stderr, live stdout: the report keeps its colour anyway.
+  ui_sh '
+    UI_TTY=""; UI_OUT_TTY=1
+    UI_PROFILE=none; UI_OUT_PROFILE=truecolor
+    ui__resolve_palette; ui__resolve_palette truecolor UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col repo 4 1 subject right; ui_trow bench
+    ui_table_data 3 0 | cat -v'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" == *'^['* ]] || { echo "a live report drew plain: $output"; false; }
+
+  # And the tool TALKING is the other way round: ui_table asks fd 2.
+  ui_sh '
+    UI_TTY=1; UI_OUT_TTY=""
+    UI_PROFILE=truecolor; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=39
+    ui_col repo 4 1 subject right; ui_trow bench
+    ui_table 3 0 2>&1 | cat -v'
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [[ "$output" == *'^['* ]] || { echo "the tool talking drew plain: $output"; false; }
+}
+
+@test "a redirected report is written whole, not fitted to a window nobody chose" {
+  # `UI_OUT_AVAIL=$UI_NOFOLD` is what ui_measure answers for a stdout that is
+  # not a terminal, set by hand here the same way UI_COLS is everywhere else in
+  # this file. A report on a pipe has no last column to stay inside, so cutting
+  # a path to fit one puts an ellipsis in the stream someone is about to grep.
+  long=/Users/you/.cache/scruff/workshop/a-lane-name-that-runs-well-past-eighty-columns-on-purpose
+  ui_sh "
+    UI_TTY=1; UI_OUT_TTY=''
+    UI_PROFILE=none; UI_OUT_PROFILE=none
+    ui__resolve_palette; ui__resolve_palette none UI_OUT_
+    UI_COLS=40; UI_AVAIL=39; UI_OUT_AVAIL=\$UI_NOFOLD
+    ui_col where 10 1 path left
+    ui_trow '$long'
+    ui_table_data 3 0"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "${#lines[@]}" -eq 1 ] || { echo "a redirected report was stacked: $output"; false; }
+  [[ "$output" == *"$long"* ]] || { echo "a redirected report was cut: $output"; false; }
+}
