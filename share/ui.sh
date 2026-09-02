@@ -706,8 +706,11 @@ ui_clear() { UI__ROWS=(); }
 ui__prev_trap() { # ui__prev_trap <var> <name> — the caller's trap, unquoted
   local p
   p="$(trap -p "$2")"
-  p="${p% SIG$2}"   # a signal: `… SIGINT`
-  p="${p% $2}"      # EXIT, and a bash that ever drops the prefix
+  # Quoted INSIDE the braces on purpose (SC2295): an unquoted expansion there
+  # is a glob PATTERN, so a name carrying one would strip the wrong thing.
+  # Every real name is a plain word, which is exactly why it would never show.
+  p="${p% SIG"$2"}"   # a signal: `… SIGINT`
+  p="${p% "$2"}"      # EXIT, and a bash that ever drops the prefix
   eval "$1=${p#trap -- }"
 }
 
