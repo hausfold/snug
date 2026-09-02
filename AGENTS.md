@@ -12,13 +12,13 @@ own file (`CLAUDE.md` here is the `@AGENTS.md` import and nothing else).
 
 | | |
 |---|---|
+| ✅ the **standard itself** — roles, marks, layout, the live-region contract, the record protocol | here, in `README.md`, and the rules a *caller* has to meet are below. It binds five repos and there is no second copy: a rule missing here is missing everywhere |
 | ✅ how a line, a table or a live region is **drawn** | here |
 | ✅ what a role **degrades to** at 256 / 16 / no colour | here |
 | ✅ the glyph set and its declared widths | here |
 | ✅ the **bash fallback** — `share/ui.sh`, the same spec for a machine with no `snug` on PATH | here, since 2026-08-27 |
 | ❌ which colour a role **is** | `hausfold/nebelung` — `palette.go` is generated from it, never hand-edited |
 | ❌ **whether** a tool should print something | that tool's repo |
-| ❌ the standard this implements | `hausfold/workshop`'s `docs/cli-presentation.md` — the design lives there because it binds five repos; this repo is one implementation of it |
 | ❌ notifications, banners, anything off the terminal | `hausfold/trill` |
 
 ## The one rule everything else follows from
@@ -103,6 +103,68 @@ The floor is **2 cells**: one glyph. At 1 there is nothing honest left to draw.
   scruff imports this one. The handler calls `signal.Reset` as its FIRST
   statement, before `CloseLive` can block on the printer's mutex, or a second ⌃C
   lands in a channel nobody is reading and the process becomes unkillable.
+
+## Rules a bash caller has to meet
+
+These are not about drawing; they are the ways a *consumer* has broken this
+library from the outside. Each cost a debugging session in `bench` or `haus`.
+
+- **The live region opens the coprocess and closes with it.** One fork per
+  command is the whole economy, and only the caller can see where a command
+  begins — so the dispatch belongs to the caller, not to `ui.sh`. Open only
+  under a terminal on fd 2 and only when ui.sh loaded, so a machine with the
+  binary but no fallback gets one answer rather than two. A `snug` that dies
+  once must stay dead for the command: a failed record write that re-forks per
+  frame is the regression the coprocess exists to prevent.
+- **Outside a region the coprocess is the wrong writer, and a message verb must
+  never open one.** A record crosses a pipe and is drawn by another process on
+  ITS stderr; a table the caller `printf`s goes straight to the terminal. The
+  two are on different schedules, so mixing them prints rows above the title
+  that introduces them. Inside a region there is no race, because a caller
+  writes nothing directly while one is up. A run of regions may share one
+  coprocess, but the close cannot wait for the command — a caller that ends
+  inside another command's tables, or dumps a build log on failure, needs the
+  coprocess already gone.
+- **Anything drawing from a background job needs its own duplicate of the write
+  end.** Bash closes a coprocess's descriptors in every child it forks, so a
+  background painter writing to `${SNUG[1]}` silently does nothing — the row
+  freezes while every assertion stays green. `exec {FD}>&"${SNUG[1]}"` is the
+  fix; bash's own copy is then closed, or nothing reaches EOF. **Its converse:
+  anything backgrounded that draws NOTHING must drop that fd**, because the
+  close waits for EOF and an inherited copy keeps it from arriving — and where
+  that job's exit condition is "the parent is gone", the two wait for each other
+  with no clock on it. **Write a test that counts frames**: a spinner that never
+  turns looks exactly like a phase that is taking a while.
+- **Nothing may repaint while `sudo` might be asking for a password.** The
+  prompt goes to `/dev/tty` — the terminal the region repaints, and one its line
+  count knows nothing about. Probe with `sudo -n true` and draw a still row when
+  it fails; the safe direction is the still row.
+- **Never name your path-to-ui.sh variable `UI_SH`.** That is ui.sh's own
+  source-twice sentinel (`[ -n "${UI_SH:-}" ] && return 0`), so a caller holding
+  the path in it makes the file return before defining anything: no error, no
+  colour, and a suite that stays green because every role is legitimately empty
+  when the painter is absent.
+- **ui.sh is bash 4+, and macOS's `/bin/bash` is 3.2**, where it does not
+  degrade but half-loads with `bad substitution`. Use `#!/usr/bin/env bash` and
+  a `BASH_VERSINFO` guard, and put the guard in the text that actually *sources*
+  it: for a script handing a snippet to another shell, the snippet is the
+  caller, and a `grep` against the outer file is satisfied by a guard protecting
+  nothing.
+- **A width probe must not be able to kill its caller.** `sz="$(stty size …)" &&
+  COLS=… || COLS="$(tput cols)"` — `set -e` exempts every command in such a list
+  *except the last*, and `tput` exits 2 with `TERM` unset, which is any session
+  with no pty. The caller then exits 2 with nothing on either stream. `|| true`
+  inside that final substitution is the fix, and ui.sh deliberately does not
+  inherit the line.
+- **Force the gate where colour is correct without a tty**, rather than
+  measuring — a statusline rendered with both descriptors captured and then
+  printed into a terminal is the case. Force only the TTY answer, leaving
+  `NO_COLOR` and `TERM=dumb` still able to win.
+- **Ask the precedence, never re-derive it.** ui.sh measures both streams at
+  load and resolves a palette for each: narration reads `UI_*`, a report reads
+  `UI_OUT_*`. Swapping `UI_TTY` and asking again is how one binary comes to
+  answer `NO_COLOR` + `CLICOLOR_FORCE` two ways. Neither answer is wrong in the
+  abstract; two answers in one binary is.
 
 ## Streams
 

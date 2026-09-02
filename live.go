@@ -104,11 +104,11 @@ func (r *Region) Close() {
 // CloseLive closes whatever region is open on this printer, if any.
 //
 // It exists for the one caller that cannot hold the *Region: a signal handler.
-// A process killed mid-frame has hidden the cursor and not put it back, which
-// the standard (the workshop's docs/cli-presentation.md, "Live regions") makes
-// a hard requirement precisely because a terminal left with no cursor is the
-// worst thing a spinner can do to you — and Go's default SIGINT disposition
-// runs no defer at all.
+// A process killed mid-frame has hidden the cursor and not put it back. The
+// live-region contract (README, "A live region", point 5) makes restoring it a
+// hard requirement on every exit path precisely because a terminal left with no
+// cursor is the worst thing a spinner can do to you — and Go's default SIGINT
+// disposition runs no defer at all.
 //
 // The library deliberately does NOT install that handler itself: a Go program
 // importing snug owns its own signal policy, and a package that quietly takes
