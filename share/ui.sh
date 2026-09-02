@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ui.sh — snug's bash half, for a machine with no `snug` on PATH.
 #
-# The standard (hausfold/workshop's docs/cli-presentation.md) ships as two
+# The standard (this repo's README.md and AGENTS.md) ships as two
 # implementations of one spec, because bash cannot link a Go library. Both live
 # in THIS repo, which is what keeps them one thing:
 #

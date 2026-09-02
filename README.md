@@ -147,16 +147,113 @@ the whole economy, and only the caller can see where a command begins.
 
 ## Colour
 
-Callers name a **role** — `accent`, `ok`, `warn`, `err`, `muted`, `subject`,
-`path`, `field` — never a colour. Roles resolve against
-[nebelung](https://github.com/hausfold/nebelung) and degrade by what the
-terminal can carry: the exact hex on truecolor, the nearest cube or ramp entry
-at 256, and *declared names* at 16, because nearest-RGB on a pastel palette puts
-`ok` and `warn` both on white.
+Callers name a **role**, never a colour. Nine of them:
+
+| role | means | nebelung token |
+| --- | --- | --- |
+| `accent` | the tool speaking — `say`, section heads | `mauve` |
+| `ok` | current, healthy, passed | `green` |
+| `warn` | stale, wants attention, degraded | `peach` |
+| `err` | failed, refused, missing | `red` |
+| `muted` | secondary detail, durations, counts | `overlay1` |
+| `subject` | the thing under discussion — repo, host, lane | `sapphire` |
+| `path` | a filesystem path or a store path | `teal` |
+| `field` | a key in a key/value grid | `subtext0` |
+| `body` | ordinary text | *terminal default* |
+
+`body` is deliberately unset rather than a token: painting ordinary prose fights
+the user's own background.
+
+A role belongs to a **column**, said once. The exception is a column whose
+meaning changes row by row — a dirty count that is amber only when it is not
+zero — so one cell may carry a role of its own (`snug.Cell`, `ui_cell`). It is
+a role and never an escape: a caller that builds the row with the colour already
+in it has put something in the cell that the padding then counts.
+
+Roles resolve against [nebelung](https://github.com/hausfold/nebelung) and
+degrade by what the terminal can carry: the exact hex on truecolor, the nearest
+cube or ramp entry at 256, *declared names* at 16 (nearest-RGB on a pastel
+palette puts `ok` and `warn` both on white), and at none the glyph carries the
+meaning alone.
 
 `NO_COLOR` is honoured, `CLICOLOR_FORCE` overrides it, `TERM=dumb` overrides
 both, and a non-terminal is colourless unless forced. The glyph carries the
 meaning; the colour is the courtesy.
+
+## The marks
+
+One glyph per role, an ASCII fallback when the locale isn't UTF-8, and **every
+one of them one cell**:
+
+| role | glyph | ascii |
+| --- | --- | --- |
+| `say` | `≋` | `~` |
+| `ok` | `✓` | `+` |
+| `warn` | `⚠` | `!` |
+| `err` | `✗` | `x` |
+| `info` | `ⓘ` | `i` |
+| `skip` | `–` | `-` |
+| `bullet` | `·` | `.` |
+| `hint` | `↳` | `>` |
+| `spin` | `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | `\|/-\` |
+
+Because they are all one cell, the gutter is **3 cells wide, always** — glyph
+plus padding to 3 — so lines with different glyphs align and a folded line has a
+fixed indent to hang from.
+
+## Layout
+
+- **Prose folds at `min(terminal width, 100)` cells.** Tables and live regions
+  are exempt: they are bounded by their own content, and a job list that stopped
+  at 100 in a 200-column window would be hiding the room it had.
+- **Every line fits or is folded — never soft-wrapped.** A tool that lets the
+  terminal wrap has given up its own indentation. Folds land on a word boundary
+  and hang at the gutter.
+- **Columns are budgeted, not declared.** Each gets a *weight* and a *minimum*.
+  If the natural widths fit, they are used; otherwise every column drops to its
+  minimum and the remainder is shared **by weight**, repeatedly, because a
+  column that reaches its natural width releases its share back. Weight decides,
+  not width — "the widest gives up first" is the usual outcome, not the rule.
+- **Truncation is by priority, with `…` inside the field.** A name cuts from the
+  right, a path from the left (`…/scruff/internal/ui`), a duration never.
+- **Below the sum of the minimums the table drops a tier** rather than emit a
+  row it knows will wrap:
+
+  | tier | keeps |
+  | --- | --- |
+  | `table` | padded name column, aligned detail |
+  | `list` | name only — the detail goes, and so does the padding |
+  | `bare` | the 3-cell indent collapses to one space |
+
+- **The floor is 2 cells**: one glyph. At 1 there is nothing honest left to draw.
+
+## A live region
+
+A block of lines rewritten in place — a job list, a phase list, a counter. The
+contract, which `Region` and `ui_paint` both hold:
+
+1. **Only on a TTY.** Piped, in CI or under `bats` it degrades to one plain line
+   per *state change*. No cursor escape ever reaches a file.
+2. **Motion is not gated on `NO_COLOR`.** A spinner on a colourless terminal is
+   still the thing you want to see.
+3. **Repaint counts screen lines, not logical rows** — equal by construction,
+   because nothing reaches the last column.
+4. **`SIGWINCH` re-measures and repaints from scratch**, clearing to end of
+   screen rather than trusting the old height.
+5. **The cursor is restored on every exit path**, `SIGINT` and a `set -e` abort
+   included.
+6. **Frame rate and poll rate stay unrelated.** Never fetch-paint-sleep.
+7. **Scrollback is append-only.** A finished region leaves its last frame there
+   and moves on.
+
+### The record protocol
+
+What a shell writes to `snug run`: tab-separated, one per line, verb first —
+`say<TAB>text`, `row<TAB>state<TAB>name<TAB>detail`, `paint`, `end`. A space
+after the verb does not parse; `run` splits on tabs and answers `unknown
+record`. A row never carries an empty field between two non-empty ones, because
+`read` collapses consecutive delimiters — only the trailing field may be empty.
+Multi-line text is one record per line; the emitter folds the newlines.
 
 ## What it is not
 
@@ -165,9 +262,11 @@ Not a TUI framework. There is no alt-screen, no event loop, no widget tree —
 will stay bash. The family's look is quiet: aligned text and a fog palette, no
 borders and no boxes.
 
-The standard it implements is
-[`docs/cli-presentation.md`](https://github.com/hausfold/workshop/blob/main/docs/cli-presentation.md)
-in the workshop.
+**This repo is the standard**, not one implementation of one kept elsewhere.
+The roles, the marks, the layout and the live-region contract above are the
+contract every hausfold CLI is held to; `AGENTS.md` carries the rules a caller
+has to meet, and `TestBashTableMatchesGo` is what stops the two halves drifting
+apart. A rule that is missing here is missing everywhere.
 
 ## Taking it
 
