@@ -428,6 +428,46 @@ PYEOF
   [[ "$output" == *$'\033[?25h'* ]] || { echo "the cursor was never restored: $(printf %q "$output")"; false; }
 }
 
+@test "a caller's INT trap is chained too, and nothing is run as a command" {
+  # The sibling of the case above, and the one that was wrong for longer.
+  # `trap -p INT` answers `trap -- '…' SIGINT` — with the prefix — while EXIT
+  # answers bare, so stripping the bare name left ` SIGINT` on the end and the
+  # `eval` ran it: the caller's trap was dropped AND one
+  # `SIGINT: command not found` landed on the terminal. Both halves are
+  # asserted, because either alone passes for the wrong reason.
+  run python3 - "$UI" "$BASH" <<'PYEOF'
+import os, pty, sys, select
+ui, bash = sys.argv[1], sys.argv[2]
+script = (
+    f"source {ui}; "
+    "trap 'echo CALLER-INT-RAN' INT; "
+    "trap 'echo CALLER-WINCH-RAN' WINCH; "
+    "ui_row run build 1s; ui_paint; ui_live_close; "
+    # The region put them back, so raising each one now reaches the caller's.
+    "kill -INT $$; kill -WINCH $$; "
+    "echo DONE"
+)
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(bash, [bash, "-c", script])
+out = b""
+while True:
+    r, _, _ = select.select([fd], [], [], 5)
+    if not r: break
+    try: d = os.read(fd, 65536)
+    except OSError: break
+    if not d: break
+    out += d
+sys.stdout.write(out.decode("utf8", "replace"))
+PYEOF
+  [[ "$output" != *"command not found"* ]] \
+    || { echo "the trap name was run as a command: $output"; false; }
+  [[ "$output" == *"CALLER-INT-RAN"* ]] \
+    || { echo "the caller's INT trap was eaten: $output"; false; }
+  [[ "$output" == *"CALLER-WINCH-RAN"* ]] \
+    || { echo "the caller's WINCH trap was eaten: $output"; false; }
+}
+
 # ── tables ───────────────────────────────────────────────────────────────────
 # The Go suite diffs this painter against `Table.Render` line for line at every
 # width (`TestBashTableMatchesGo`). These are the parts that diff cannot reach:

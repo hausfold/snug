@@ -692,14 +692,32 @@ ui_clear() { UI__ROWS=(); }
 # scratch worktree or a temp file. `trap -p` prints a re-installable command;
 # stripping it back to the bare string and eval-ing the assignment is what
 # unquotes it correctly, embedded quotes included.
+#
+# ⚠️ And `trap -p` does NOT spell the two the same way. A SIGNAL comes back with
+# its SIG prefix — `trap -- '…' SIGINT` — while EXIT, which is not a signal,
+# comes back bare. Measured on bash 5.3, and it is a bash detail rather than a
+# choice we get to make. Stripping only the bare name leaves ` SIGINT` on the
+# end of the string, so the `eval` below reads it as a COMMAND with a temporary
+# assignment in front of it: the variable never lands, `ui_live_close` puts
+# back nothing, and the caller gets one `SIGINT: command not found` on the
+# terminal it was about to paint. Silent for the common caller, which has no
+# INT trap of its own to chain — haus's `haus-fix`, which holds a lock
+# directory across the wait, was the first one that did.
+ui__prev_trap() { # ui__prev_trap <var> <name> — the caller's trap, unquoted
+  local p
+  p="$(trap -p "$2")"
+  p="${p% SIG$2}"   # a signal: `… SIGINT`
+  p="${p% $2}"      # EXIT, and a bash that ever drops the prefix
+  eval "$1=${p#trap -- }"
+}
+
 ui_live_open() {
   [ -n "$UI__LIVE" ] && return 0
   UI__LIVE=1
   [ -z "$UI_TTY" ] && return 0
-  local p
-  p="$(trap -p EXIT)";  p="${p% EXIT}";  eval "UI__PREV_EXIT=${p#trap -- }"
-  p="$(trap -p INT)";   p="${p% INT}";   eval "UI__PREV_INT=${p#trap -- }"
-  p="$(trap -p WINCH)"; p="${p% WINCH}"; eval "UI__PREV_WINCH=${p#trap -- }"
+  ui__prev_trap UI__PREV_EXIT  EXIT
+  ui__prev_trap UI__PREV_INT   INT
+  ui__prev_trap UI__PREV_WINCH WINCH
   # bash delivers SIGWINCH between commands, so this fires the moment the frame
   # `sleep` returns — a tenth of a second, which reads as instant.
   trap 'ui_measure; eval "$UI__PREV_WINCH"' WINCH
