@@ -7,10 +7,13 @@ only imports it.
 
 ## What lives here
 
+[`README.md`](./README.md) is the standard a caller programs against; this file
+is the other half, what breaks and what to run.
+
 | | |
 |---|---|
-| the standard — roles, marks, layout, live-region contract, record protocol | `README.md`; the rules a *caller* must meet are below. No second copy exists: a rule missing here is missing everywhere |
-| how a line, table or region is drawn; what a role degrades to at 256 / 16 / none; glyph widths; the bash fallback `share/ui.sh` | here |
+| the two APIs, streams, roles, marks, layout, the live-region contract, the record protocol, what a role degrades to at 256 / 16 / none | [`README.md`](./README.md) |
+| the traps, the rules a *caller* must meet, the checks, how the palette is generated | here |
 | which colour a role **is** | `hausfold/nebelung` — `palette.go` is generated from it |
 | **whether** a tool prints something | that tool's repo |
 | anything off the terminal | `hausfold/trill` |
@@ -18,9 +21,9 @@ only imports it.
 ## The one rule
 
 **Nothing snug draws may reach the terminal's last column** — at any width, in
-any tier, fallbacks included. A line as wide as the terminal wraps, so
-`Term.Avail()` is `Width - 1`; a stream with no window gets `NoFold`, as
-`Prose()` and `ui_measure` do. The floor is 2 cells: one glyph.
+any tier, the bash fallback included ([README](./README.md) has the why, and the
+2-cell floor). Here that is `Term.Avail()` = `Width - 1`, and `NoFold` for a
+stream with no window — what `Prose()` and `ui_measure` get.
 
 Run first on any change: `TestRegionNeverReachesTheLastColumn`,
 `TestTableNeverReachesTheLastColumn`, `TestBashTableNeverReachesTheLastColumn`
@@ -34,17 +37,16 @@ and bats's *"a table never reaches the last column"*, all sweeping widths 2–20
   `TIOCGWINSZ` (`x/term`) tracks a resize. In a shell that is `stty size` read
   from `/dev/tty`, not `<&1`: inside `$( )` fd 1 is the pipe.
 - **Glyph widths are declared in `glyph.go`, never measured** (why: README's
-  preamble). Width libraries measure content only; never append a variation
-  selector to a mark. Check a terminal against digits, never another mark:
+  preamble). Never append a variation selector to a mark. Check a terminal
+  against digits, never another mark:
   `printf '123456789\n\u24D8|\n'` — `|` at column 3 means two cells.
 - **Choose the tier from the WINDOW, then clamp the column to the CONTENT.**
   The other order drops durations on a 200-column terminal:
   `TestShortNamesKeepTheirDetail`.
 - **A column that never truncates is measured, not assumed.** `12m 34s` is
   seven cells; GitHub allows six-hour jobs, and `100m 05s` is eight.
-- **Nearest-RGB is wrong at 16 colours** — pastel `green` and `peach` both land
-  on grey, so `ok` and `warn` merge. `role16` maps by intent;
-  `TestSixteenColoursCollapseDeclaredRoles`.
+- **Never compute the sixteen.** `role16` maps by intent, for the reason
+  README's degradation list gives; `TestSixteenColoursCollapseDeclaredRoles`.
 - **Re-measure with the separator in.** `TruncateLeft` cuts at a `/` and keeps it.
 - **A `defer` does not survive SIGINT, and the library must not take it.**
   `Printer.CloseLive()` is the seam; only `cmd/snug` installs a handler, since
@@ -89,12 +91,10 @@ Each has broken `bench` or `haus` from the outside.
 
 ## Streams
 
-**Stdout carries data only** — callers do `cd "$(scruff child …)"`. `Say`,
-`Warn` and `Fail` write to `Err`; `Data` and `PrintData` are the only writers
-of `Out`. A report is data: `PrintData` measures `Out`; `Print` is the stderr
-half. Geometry and palette come from the stream a line lands on, never the
-other. `snug run` works as a `coproc` because bash pipes stdin/stdout and
-leaves stderr on the terminal.
+The rule is [README's](./README.md#streams). `snug run` works as a `coproc`
+because bash pipes stdin/stdout and leaves stderr on the terminal — which is
+where the region paints, and why a caller reading `${SNUG[0]}` never sees a
+frame.
 
 ## Cost
 
@@ -104,9 +104,9 @@ leaves stderr on the terminal.
 | `charm.land/lipgloss/v2` + `x/term` | 3.0 MB | 22 | 4.4 ms |
 
 lipgloss is borders and boxes; what we would use of it `x/ansi` already is. Not
-bubbletea: it owns the event loop, and `bench` needs a filter it drives. **A
-fork is ~4.5 ms, so fork per COMMAND, never per line** — sixty `snug say`s in a
-`haus rebuild` is 270 ms; one `snug run` is one fork.
+bubbletea: it owns the event loop, and `bench` needs a filter it drives. That
+4.5 ms cold start is where README's fork-per-command rule comes from; keep it
+measured before adding a dependency.
 
 ## The palette is generated — both copies, one run
 
@@ -140,8 +140,8 @@ print and measure its raw `\037` tag.
 - `vendorHash` in `flake.nix` is pinned, never `null` — `null` fetches at build
   time and fails sandboxed. After a `go.mod`/`go.sum` change,
   `nix build .#default` prints the mismatch; take the `got:` line.
-- `share/ui.sh` ships in the derivation (`postInstall`); `haus` reads
-  `${snug}/share/ui.sh` off the store path, so moving it breaks a consumer this
-  CI cannot see. Check: `nix build .#default && ls result/share`.
+- **Don't move `share/ui.sh`** — `haus` reads `${snug}/share/ui.sh` off the
+  store path the `postInstall` puts it on, so a move breaks a consumer this CI
+  cannot see. Check: `nix build .#default && ls result/share`.
 - `overlays.default` is how `pkgs.snug` reaches `haus`; a new output is
   invisible downstream until `bench ship` bumps haus's lock.
