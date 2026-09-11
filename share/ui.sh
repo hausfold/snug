@@ -239,9 +239,9 @@ declare -gA UI__TOKEN=(
 # What a role becomes at sixteen colours, DECLARED rather than computed.
 #
 # Nearest-RGB is the wrong algorithm here and measurably so: nebelung is pastel,
-# so `green` (#abe1a6) and `peach` (#f5b58e) both land nearer mid-grey than any
-# named colour, and `ok` and `warn` come out identical — the two roles it
-# matters most to tell apart. Sixteen colours are NAMES, so this maps by intent:
+# so `green` (#abe1a6) and `peach` (#f5b58e) both land on ANSI 7, the white slot,
+# ahead of every other name, and `ok` and `warn` come out identical — the two
+# roles it matters most to tell apart. Sixteen colours are NAMES, so this maps by intent:
 # ok is green because ok means green, not because the arithmetic said so.
 #
 # The roles the sixteen cannot carry collapse on purpose, rather than two of

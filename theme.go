@@ -188,9 +188,10 @@ func nearest256(r, g, b int) int {
 // rather than computed.
 //
 // Nearest-RGB is the wrong algorithm here, and measurably so: nebelung is a
-// pastel palette, so `green` (#abe1a6) and `peach` (#f5b58e) both land nearer
-// mid-grey than any named colour, and ok and warn come out identical — the two
-// roles it matters most to tell apart. Sixteen colours are names, so the map is
+// pastel palette, so `green` (#abe1a6) and `peach` (#f5b58e) both land on ANSI 7
+// — the white slot, ahead of every other name — and ok and warn come out
+// identical, the two roles it matters most to tell apart. Sixteen colours are
+// names, so the map is
 // by INTENT: ok is green because ok means green, not because the arithmetic
 // said so.
 var role16 = map[Role]int{

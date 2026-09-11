@@ -20,8 +20,10 @@ is the other half, what breaks and what to run.
 
 ## The one rule
 
-[README's rule](./README.md) is `Term.Avail()` = `Width - 1` here, and `NoFold`
-for a stream with no window — what `Prose()` and `ui_measure` get.
+**Nothing snug draws may reach the terminal's last column** — at any width, in
+any tier, the bash fallback included ([README](./README.md) has the why, and the
+2-cell floor). Here that is `Term.Avail()` = `Width - 1`, and `NoFold` for a
+stream with no window — what `Prose()` and `ui_measure` get.
 
 Run first on any change: `TestRegionNeverReachesTheLastColumn`,
 `TestTableNeverReachesTheLastColumn`, `TestBashTableNeverReachesTheLastColumn`

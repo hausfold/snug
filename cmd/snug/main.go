@@ -3,12 +3,12 @@
 //
 // Two shapes, and the difference matters:
 //
-//	snug say "resolving inputs"        one line, one fork (~4ms)
+//	snug say "resolving inputs"        one line, one fork (~4.5 ms)
 //	snug run < protocol                one fork for a WHOLE command
 //
 // Use `run` for anything with a live region or more than a handful of lines. A
-// fork costs about four milliseconds; a fork per line would put a third of a
-// second of pure overhead into a sixty-line `haus rebuild`. `run` reads records
+// fork is ~4.5 ms, so sixty of them put 270 ms of pure overhead into a
+// sixty-line `haus rebuild`. `run` reads records
 // off stdin for the life of the command, so the process count is one and the
 // spinner keeps turning while log lines scroll above it.
 //
@@ -33,6 +33,7 @@ import (
 const usage = `snug — how the hausfold family puts a line on screen
 
   snug say|ok|warn|fail|info|hint <text>   one line, one fork
+  snug data <text>                         one line on stdout, unpainted
   snug run                                 read records on stdin, one fork per command
   snug width                               the window's width in cells, measured
   snug caps                                what snug detected about this terminal
@@ -46,7 +47,7 @@ records for ` + "`run`" + `, tab-separated, one per line:
                                            run wait ok warn fail skip
   paint                                    repaint the live region
   clear                                    empty it
-  frame <n>                                set the spinner's frame explicitly
+  frame <n>                                the counter the next paint advances from
   end                                      close it and restore the cursor
 `
 

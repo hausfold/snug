@@ -31,9 +31,9 @@ is one cell bare and two as the emoji-presentation sequence `U+26A0 U+FE0F`, so
 the table holds bare codepoints. None of that is a terminal, and the table
 records what a terminal actually draws.
 
-Narrow the window and nothing wraps: a live region sheds its detail column,
-then its padding; a table budgets down to its minimums, then stacks into
-label/value pairs.
+Narrow the window and nothing wraps: a live region sheds its detail column and
+padding together, then its gutter; a table budgets down to its minimums, then
+stacks into label/value pairs.
 
 ## For Go
 
@@ -126,8 +126,9 @@ ui_trow haus "$c"                  # meaning changes row by row
 ```
 
 Same roles, same glyphs, same tiers, same palette — its colour tables are
-generated from the same `TOKENS` list as `palette.go`, and its layout is diffed
-against the binary's at every width, so the two halves cannot drift. Lower
+generated from the same `TOKENS` list as `palette.go`, and its *table* layout is
+diffed against the binary's at every width by `TestBashTableMatchesGo`. The
+region tiers are held by each half's own width sweeps, not across them. Lower
 fidelity in one place only: it measures characters, not cells, so it is honest
 about ordinary text and hands emoji to the binary. It is deliberately *not* a
 wrapper around `snug` when snug is present — one fork per command is the whole
@@ -136,8 +137,8 @@ economy, and only the caller can see where a command begins.
 ## Streams
 
 **Stdout carries data only**, because a caller does `cd "$(scruff child …)"`.
-`Say`, `Warn` and `Fail` write to stderr; `Data` and `PrintData` are the only
-writers of stdout.
+`Say`, `Warn` and `Fail` write to `Err`; `Data` and `PrintData` are the only
+writers of `Out` — stderr and stdout as `NewPrinter` sets them.
 
 A **report** is the thing the user ran the command for — `bench status`, the
 `scruff` listing — so it is data, and `PrintData` puts it on stdout where
@@ -176,8 +177,8 @@ in it has put something in the cell that the padding then counts.
 Roles resolve against [nebelung](https://github.com/hausfold/nebelung) and
 degrade by what the terminal can carry: the exact hex on truecolor, the nearest
 cube or ramp entry at 256, *declared names* at 16 (nearest-RGB on a pastel
-palette lands `ok` and `warn` both on mid-grey), and at none the glyph carries
-the meaning alone.
+palette lands `ok` and `warn` both on ANSI 7, the white slot), and at none the
+glyph carries the meaning alone.
 
 `NO_COLOR` is honoured, `CLICOLOR_FORCE` overrides it, `TERM=dumb` overrides
 both, and a non-terminal is colourless unless forced. The glyph carries the
@@ -255,8 +256,9 @@ The contract, which `Region` and `ui_paint` both hold:
 
 What a shell writes to `snug run`: tab-separated, one per line, verb first —
 `say<TAB>text` and its siblings, `data<TAB>text`,
-`row<TAB>state<TAB>name<TAB>detail`, then `paint`, `clear`, `frame<TAB>n` and
-`end`. `snug --help` is the list, with the six row states.
+`row<TAB>state<TAB>name<TAB>detail`, then `paint`, `clear`, `frame<TAB>n` (the
+counter the next `paint` advances from) and `end`. `snug --help` is the list,
+with the six row states.
 
 A space after the verb does not parse; `run` splits on tabs and answers `unknown
 record`. A row never carries an empty field between two non-empty ones, because
