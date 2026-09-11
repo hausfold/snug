@@ -28,11 +28,12 @@ the truncation `…` are `East_Asian_Width = Ambiguous`, so they are one cell in
 a Western locale and two under an East-Asian one — and every width library
 ships a mode for each, which means a library has no single answer to give. `⚠`
 is one cell bare and two as the emoji-presentation sequence `U+26A0 U+FE0F`, so
-the table holds bare codepoints. None of that is a terminal. The table records
-what a terminal actually draws.
+the table holds bare codepoints. None of that is a terminal, and the table
+records what a terminal actually draws.
 
-Narrow the window and the table sheds its detail column, then its padding, then
-stacks into label/value pairs. It never emits a row it knows will wrap.
+Narrow the window and nothing wraps: a live region sheds its detail column,
+then its padding; a table budgets down to its minimums, then stacks into
+label/value pairs.
 
 ## For Go
 
@@ -57,14 +58,6 @@ for {
 }
 ```
 
-A **report** is the thing the user ran the command for — `bench status`, the
-`scruff` listing — and it belongs on stdout so `| less` carries it whole.
-`PrintData` puts it there and measures *that* stream to do it: budget a report
-from stderr and a TTY stdout beside a redirected stderr draws plain, while a
-piped stdout beside a live stderr draws escapes into the pipe. `Print` is the
-other half — a table that is part of what the tool is *saying*, on stderr with
-`Say` and `Warn`.
-
 A `defer` does not survive a ⌃C: Go's default SIGINT disposition terminates the
 process without running one, so `r.Close()` never fires and the cursor stays
 hidden on the terminal for good. snug will not install a signal handler for you
@@ -88,19 +81,22 @@ go func() {
 ## For shells
 
 ```sh
-snug say "resolving inputs"          # one line, one fork (~4 ms)
+snug say "resolving inputs"          # one line, one fork (~4.5 ms)
 
 coproc SNUG { snug run; }            # one fork for a WHOLE command
 printf 'row\trun\tpublish\t\npaint\n' >&${SNUG[1]}
 ```
 
 Use `run` for anything with a live region or more than a handful of lines. A
-fork per line would put a third of a second of pure overhead into a sixty-line
-`haus rebuild`. `run` also lets log lines scroll *above* a spinner that is still
-turning — which a shell painter cannot do at all.
+fork is ~4.5 ms, so **fork per command, never per line**: sixty `snug say`s in a
+`haus rebuild` is 270 ms of pure overhead, and one `snug run` is one fork. `run`
+also lets log lines scroll *above* a spinner that is still turning — which a
+shell painter cannot do at all.
 
 `snug caps` reports what it detected; `snug demo` draws the whole vocabulary on
 your terminal, which is the fastest way to see what a resize does to it.
+[`AGENTS.md`](./AGENTS.md) has the rules a caller has to meet — the
+coprocess's lifetime, a background job's own write end, `sudo` on `/dev/tty`.
 
 ### When there is no binary
 
@@ -129,21 +125,28 @@ ui_cell c warn "3 files"           # a role for ONE cell, where the column's
 ui_trow haus "$c"                  # meaning changes row by row
 ```
 
-`ui_table_data` is `PrintData` and `ui_table` is `Print`, including the part
-that matters: each measures, gates and paints for the stream it lands on, so a
-report keeps its colour on a live stdout beside a redirected stderr and gets
-none on a piped one beside a live terminal.
+Same roles, same glyphs, same tiers, same palette — its colour tables are
+generated from the same `TOKENS` list as `palette.go`, and its layout is diffed
+against the binary's at every width, so the two halves cannot drift. Lower
+fidelity in one place only: it measures characters, not cells, so it is honest
+about ordinary text and hands emoji to the binary. It is deliberately *not* a
+wrapper around `snug` when snug is present — one fork per command is the whole
+economy, and only the caller can see where a command begins.
 
-Same roles, same glyphs, same tiers, same palette — generated from the same
-`TOKENS` list as `palette.go`, so the two halves cannot disagree about a colour.
-A layout cannot be generated the way a palette can, so it is diffed instead:
-`TestBashTableMatchesGo` renders the same columns and rows through both painters
-at every width from too narrow to draw at all up to wider than any content, and
-reds on the first line they disagree about. Lower fidelity in one place only: it
-measures characters, not cells, so it is honest about ordinary text and hands
-emoji to the binary. It is deliberately
-*not* a wrapper around `snug` when snug is present — one fork per **command** is
-the whole economy, and only the caller can see where a command begins.
+## Streams
+
+**Stdout carries data only**, because a caller does `cd "$(scruff child …)"`.
+`Say`, `Warn` and `Fail` write to stderr; `Data` and `PrintData` are the only
+writers of stdout.
+
+A **report** is the thing the user ran the command for — `bench status`, the
+`scruff` listing — so it is data, and `PrintData` puts it on stdout where
+`| less` carries it whole. `Print` is the other half, on stderr with `Say` and
+`Warn`, for a table that is part of what the tool is *saying*. Each measures the
+stream it lands on, never the other: budget a report from stderr and a TTY
+stdout beside a redirected stderr draws plain, while a piped stdout beside a
+live stderr draws escapes into the pipe. `ui_table_data` and `ui_table` are the
+same two halves.
 
 ## Colour
 
@@ -173,8 +176,8 @@ in it has put something in the cell that the padding then counts.
 Roles resolve against [nebelung](https://github.com/hausfold/nebelung) and
 degrade by what the terminal can carry: the exact hex on truecolor, the nearest
 cube or ramp entry at 256, *declared names* at 16 (nearest-RGB on a pastel
-palette puts `ok` and `warn` both on white), and at none the glyph carries the
-meaning alone.
+palette lands `ok` and `warn` both on mid-grey), and at none the glyph carries
+the meaning alone.
 
 `NO_COLOR` is honoured, `CLICOLOR_FORCE` overrides it, `TERM=dumb` overrides
 both, and a non-terminal is colourless unless forced. The glyph carries the
@@ -216,28 +219,30 @@ fixed indent to hang from.
   not width — "the widest gives up first" is the usual outcome, not the rule.
 - **Truncation is by priority, with `…` inside the field.** A name cuts from the
   right, a path from the left (`…/scruff/internal/ui`), a duration never.
-- **Below the sum of the minimums the table drops a tier** rather than emit a
-  row it knows will wrap:
-
-  | tier | keeps |
-  | --- | --- |
-  | `table` | padded name column, aligned detail |
-  | `list` | name only — the detail goes, and so does the padding |
-  | `bare` | the 3-cell indent collapses to one space |
-
+- **Below the sum of the minimums a table stops budgeting and stacks** — one
+  label/value pair per line, the label truncated too, rather than emit a row it
+  knows will wrap.
 - **The floor is 2 cells**: one glyph. At 1 there is nothing honest left to draw.
 
 ## A live region
 
-A block of lines rewritten in place — a job list, a phase list, a counter. The
-contract, which `Region` and `ui_paint` both hold:
+A block of lines rewritten in place — a job list, a phase list, a counter. It
+has three tiers of its own, widest first, each giving up the least useful thing
+left:
+
+| tier | keeps |
+| --- | --- |
+| `table` | padded name column, aligned detail |
+| `list` | name only — the detail goes, and so does the padding |
+| `bare` | the 3-cell gutter collapses to one space |
+
+The contract, which `Region` and `ui_paint` both hold:
 
 1. **Only on a TTY.** Piped, in CI or under `bats` it degrades to one plain line
    per *state change*. No cursor escape ever reaches a file.
 2. **Motion is not gated on `NO_COLOR`.** A spinner on a colourless terminal is
    still the thing you want to see.
-3. **Repaint counts screen lines, not logical rows** — equal by construction,
-   because nothing reaches the last column.
+3. **Repaint counts screen lines, not logical rows** — equal by construction.
 4. **`SIGWINCH` re-measures and repaints from scratch**, clearing to end of
    screen rather than trusting the old height.
 5. **The cursor is restored on every exit path**, `SIGINT` and a `set -e` abort
@@ -249,8 +254,11 @@ contract, which `Region` and `ui_paint` both hold:
 ### The record protocol
 
 What a shell writes to `snug run`: tab-separated, one per line, verb first —
-`say<TAB>text`, `row<TAB>state<TAB>name<TAB>detail`, `paint`, `end`. A space
-after the verb does not parse; `run` splits on tabs and answers `unknown
+`say<TAB>text` and its siblings, `data<TAB>text`,
+`row<TAB>state<TAB>name<TAB>detail`, then `paint`, `clear`, `frame<TAB>n` and
+`end`. `snug --help` is the list, with the six row states.
+
+A space after the verb does not parse; `run` splits on tabs and answers `unknown
 record`. A row never carries an empty field between two non-empty ones, because
 `read` collapses consecutive delimiters — only the trailing field may be empty.
 Multi-line text is one record per line; the emitter folds the newlines.
@@ -263,10 +271,10 @@ will stay bash. The family's look is quiet: aligned text and a fog palette, no
 borders and no boxes.
 
 **This repo is the standard**, not one implementation of one kept elsewhere.
-The roles, the marks, the layout and the live-region contract above are the
-contract every hausfold CLI is held to; `AGENTS.md` carries the rules a caller
-has to meet, and `TestBashTableMatchesGo` is what stops the two halves drifting
-apart. A rule that is missing here is missing everywhere.
+Everything above is the contract every hausfold CLI is held to, and
+[`AGENTS.md`](./AGENTS.md) is the other half of it: what a caller must do to
+meet the contract, and what breaks when it doesn't. A rule missing from the two
+of them is missing everywhere.
 
 ## Taking it
 

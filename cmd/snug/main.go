@@ -46,6 +46,7 @@ records for ` + "`run`" + `, tab-separated, one per line:
                                            run wait ok warn fail skip
   paint                                    repaint the live region
   clear                                    empty it
+  frame <n>                                set the spinner's frame explicitly
   end                                      close it and restore the cursor
 `
 
