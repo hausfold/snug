@@ -4,6 +4,14 @@ on:
     branches: [main]
   pull_request:
 
+# A second push to a PR branch makes the first run's answer worthless, and the
+# abandoned run still holds a runner — on the macOS ones, a queue slot the next
+# PR then waits behind. Only PR runs cancel: a push to main is a distinct commit
+# whose tick someone may need to read back.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     strategy:
@@ -38,8 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y bats shellcheck
-      - run: shellcheck share/ui.sh
+      # shellcheck is on the ubuntu-latest image already, and bats comes from
+      # npm rather than apt: `apt-get update` bought one of the two tools and,
+      # on the day the Azure mirrors go quiet, hangs rather than fails.
+      - run: sudo npm install -g bats
+      - run: shellcheck --version && shellcheck share/ui.sh
       # The palette drift test used to need a second checkout beside this one
       # and skipped — green, checking nothing — without it. Both halves are in
       # this repo now, so it always runs.
@@ -55,6 +66,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v23
       - run: nix build .#default --print-build-logs
       - run: nix flake check --print-build-logs
