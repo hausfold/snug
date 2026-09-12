@@ -127,8 +127,9 @@ print and measure its raw `\037` tag.
 
 ## Working here
 
-- `go test ./...` first; the width sweeps are the point. CI also runs
-  `gofmt -w .`, `go vet ./...` and `go test -race`.
+- `go test ./...` first; the width sweeps are the point. CI also runs `go vet
+  ./...` and `go test -race`, and gates on `gofmt -l .` — it checks, it never
+  writes, so run `gofmt -w .` yourself before you push.
 - `bats test/ui.bats` and `shellcheck share/ui.sh` are the other half; the Go
   suite never sees them. bats runs `"$BASH"`, never bare `bash` — macOS's 3.2
   fails on the associative array first.
