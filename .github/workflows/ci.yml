@@ -97,9 +97,15 @@ jobs:
       # rather than six seconds: it would show up as a build escaping the
       # sandbox, not as a red step.
       #
-      # ⚠️ Not a swap to make in pounce: its Determinate pin is load-bearing
-      # for the macOS build sandbox, and nobody has measured quick-install on a
-      # Mac runner at all.
+      # ⚠️ `sandbox = true` above is a LINUX default and not a property of
+      # this installer. Off Linux nix defaults it to FALSE and neither
+      # installer writes the line at all, which is what pounce found when it
+      # took this same action to macos-15 (hausfold/pounce#142 — 5.1s against
+      # Determinate's 68.2s, paired over eight runs, same derivation hash).
+      # The reason this comment used to give for leaving pounce alone, that
+      # Determinate relaxes a macOS build sandbox, was never true. Nothing in
+      # the family's gate installs Determinate now; workshop `docs/ci.md` §
+      # The Nix installer carries both platforms' numbers.
       - uses: nixbuild/nix-quick-install-action@v35
       - run: nix build .#default --print-build-logs
       - run: nix flake check --print-build-logs
