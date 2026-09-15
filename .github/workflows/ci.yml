@@ -75,6 +75,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v23
+      # The installer is the only lever left on this job. A store cache was
+      # measured here and refused — 3-4s of restorable download against a 17s
+      # restore at the family's cheapest, workshop `docs/ci.md` § The Nix store
+      # cache — which leaves the install, 6.9s of a 41s job and the longest job
+      # in this run.
+      #
+      # quick-install unpacks an upstream Nix tarball into a single-user /nix
+      # instead of running an installer that configures a daemon, and lands in
+      # 0.8s here: the same second haus and nebelung have been paying.
+      #
+      # It is NOT the same Nix, and the difference was read off a run rather
+      # than assumed (34948548370, this branch before the PR): upstream 2.34.7
+      # against `nix-installer-action@v23`'s Determinate Nix, no daemon, and
+      # `build-users-group` empty so the builder is `runner` itself. Both
+      # things these two steps need are there — `experimental-features =
+      # fetch-tree flakes nix-command`, which the action writes for any nix
+      # past 2.13, and `sandbox = true`, which single-user mode keeps because
+      # the runner allows unprivileged user namespaces. A future runner image
+      # that takes those away is the one thing that would make this a downgrade
+      # rather than six seconds: it would show up as a build escaping the
+      # sandbox, not as a red step.
+      #
+      # ⚠️ Not a swap to make in pounce: its Determinate pin is load-bearing
+      # for the macOS build sandbox, and nobody has measured quick-install on a
+      # Mac runner at all.
+      - uses: nixbuild/nix-quick-install-action@v35
       - run: nix build .#default --print-build-logs
       - run: nix flake check --print-build-logs
