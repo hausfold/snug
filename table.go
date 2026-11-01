@@ -20,6 +20,12 @@ const (
 // minimums no longer fit, the whole table drops to stacked key/value rather
 // than emitting a row it knows will wrap. Weight shares out whatever is left
 // over once every column has its minimum.
+//
+// Head doubles as the column's LABEL: it is what the stacked fallback prints
+// beside each value when the window is too narrow for any table at all. So give
+// every column a Head even when Header is false, which is the family default —
+// our tables are read by shape, and a header row on three rows of data is
+// furniture.
 type Col struct {
 	Head   string
 	Min    int
@@ -36,12 +42,6 @@ type Table struct {
 	Indent int  // cells before the first column; 3 matches the family gutter
 	Header bool // draw the column names as a first row
 }
-
-// Head doubles as the column's LABEL: it is what the stacked fallback prints
-// beside each value when the window is too narrow for any table at all. So give
-// every column a Head even when Header is false, which is the family default —
-// our tables are read by shape, and a header row on three rows of data is
-// furniture.
 
 const colGap = 1 // one space between columns; two reads as a gutter, not a gap
 
